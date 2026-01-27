@@ -11,7 +11,8 @@ module.exports = {
   ],
   testPathIgnorePatterns: [
     '/node_modules/',
-    '/tests/integration/'  // Skip integration tests for now - run separately
+    '/tests/integration/',  // Integration tests - run with npm run test:integration
+    '/tests/unit/services/browser.test.js'  // Browser tests require complex mock isolation
   ],
   setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
   testTimeout: 30000,

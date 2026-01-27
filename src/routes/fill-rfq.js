@@ -201,14 +201,14 @@ router.post('/', async (req, res) => {
       try {
         const response = await page.goto(url, {
           waitUntil: 'load',
-          timeout: 60000
+          timeout: 120000
         });
 
         if (response) {
           logger.info('Navigation response', { requestId, status: response.status() });
         }
 
-        await page.waitForNetworkIdle({ timeout: 30000 }).catch(() => {
+        await page.waitForNetworkIdle({ timeout: 60000 }).catch(() => {
           logger.warn('Network idle timeout, continuing', { requestId });
         });
 

@@ -10,7 +10,8 @@ const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const CHROME_PATH = process.env.CHROME_PATH ||
   (process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : undefined);
 const HEADLESS = IS_PRODUCTION;
-const DEFAULT_TIMEOUT = 60000;
+const DEFAULT_TIMEOUT = 120000; // 2 minutes
+const PROTOCOL_TIMEOUT = 300000; // 5 minutes for CDP protocol
 const VIEWPORT = { width: 1920, height: 1080 };
 
 // Track active browsers for graceful shutdown
@@ -31,9 +32,15 @@ async function launchBrowser(requestId) {
       '--disable-default-apps',
       '--disable-sync',
       '--no-first-run',
+      '--single-process',
+      '--disable-software-rasterizer',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--memory-pressure-off',
       `--window-size=${VIEWPORT.width},${VIEWPORT.height}`
     ],
-    protocolTimeout: 120000
+    protocolTimeout: PROTOCOL_TIMEOUT
   };
 
   // Only add security-relaxing flags in development
