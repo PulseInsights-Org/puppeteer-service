@@ -1,0 +1,21 @@
+{
+  "name": "puppeteer-service",
+  "version": "1.0.0",
+  "description": "Standalone Puppeteer service for RFQ form automation",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js"
+  },
+  "keywords": ["puppeteer", "automation", "rfq"],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "puppeteer": "^24.11.1"
+  }
+}
