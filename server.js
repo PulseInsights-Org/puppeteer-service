@@ -60,7 +60,7 @@ app.get('/', (req, res) => {
     endpoints: {
       health: '/puppeteer/health',
       ready: '/puppeteer/ready',
-      fillRfq: 'POST /puppeteer/api/fill-rfq'
+      fillRfq: 'POST /puppeteer/fill-rfq'
     }
   });
 });

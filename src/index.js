@@ -10,7 +10,7 @@
  * Endpoints:
  *   GET  /puppeteer/health       - Health check
  *   GET  /puppeteer/ready        - Readiness probe
- *   POST /puppeteer/api/fill-rfq - Fill RFQ form
+ *   POST /puppeteer/fill-rfq     - Fill RFQ form
  */
 
 const express = require('express');
@@ -89,7 +89,7 @@ router.get('/ready', (req, res) => {
 // API ROUTES
 // =============================================================================
 
-router.use('/api/fill-rfq', require('./routes/fill-rfq'));
+router.use('/fill-rfq', require('./routes/fill-rfq'));
 
 // =============================================================================
 // ERROR HANDLING (Puppeteer-specific)

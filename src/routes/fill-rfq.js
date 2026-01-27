@@ -1,6 +1,6 @@
 /**
  * Puppeteer Service - Fill RFQ Route
- * POST /puppeteer/api/fill-rfq
+ * POST /puppeteer/fill-rfq
  */
 
 const express = require('express');
@@ -54,7 +54,7 @@ router.use((req, res, next) => {
 
 /**
  * @swagger
- * /puppeteer/api/fill-rfq:
+ * /puppeteer/fill-rfq:
  *   post:
  *     summary: Fill RFQ form using browser automation
  *     tags: [Puppeteer]
