@@ -13,6 +13,14 @@ const { rateLimit } = require('../middleware/rate-limiter');
 const { launchBrowser, setupPage, closeBrowser, getShuttingDown } = require('../services/browser');
 const { fillRfqForm, cancelFormSubmission, submitForm, delay } = require('../services/form-filler');
 const { captureAndUploadScreenshot, isConfigured: isSupabaseConfigured } = require('../services/screenshot');
+const {
+  generateIdempotencyKey,
+  checkIdempotency,
+  startProcessing,
+  markCompleted,
+  markFailed,
+  removeKey
+} = require('../services/idempotency');
 
 // Apply rate limiting to this route
 router.use(rateLimit());
@@ -193,6 +201,66 @@ router.post('/', async (req, res) => {
   }
 
   const url = rfq_details.quote_submission_url;
+
+  // IDEMPOTENCY CHECK: Prevent duplicate form submissions in production mode
+  const idempotencyKey = generateIdempotencyKey(rfqId, url, isTestMode);
+
+  // Check for existing processing or completed request
+  const existingRecord = checkIdempotency(idempotencyKey);
+  if (existingRecord) {
+    if (existingRecord.status === 'processing') {
+      logger.warn('Duplicate request rejected - already processing', {
+        requestId,
+        rfqId,
+        isTestMode,
+        idempotencyKey
+      });
+      return res.status(409).json({
+        success: false,
+        error: 'Request already being processed. Please wait for completion.',
+        requestId,
+        idempotencyKey,
+        existingStatus: 'processing'
+      });
+    }
+
+    if (existingRecord.status === 'completed' && !isTestMode) {
+      // In production mode, return cached result to prevent duplicate submissions
+      logger.warn('Duplicate production submission prevented - returning cached result', {
+        requestId,
+        rfqId,
+        idempotencyKey
+      });
+      return res.status(200).json({
+        ...existingRecord.result,
+        cached: true,
+        message: 'Form was already submitted successfully. Returning cached result.',
+        requestId
+      });
+    }
+
+    // For test mode or failed requests, allow retry (remove old key)
+    if (existingRecord.status === 'failed' || isTestMode) {
+      logger.info('Allowing retry for previous failed/test request', {
+        requestId,
+        rfqId,
+        previousStatus: existingRecord.status,
+        isTestMode
+      });
+      removeKey(idempotencyKey);
+    }
+  }
+
+  // Mark request as processing
+  if (!startProcessing(idempotencyKey)) {
+    // Race condition - another request started between check and start
+    return res.status(409).json({
+      success: false,
+      error: 'Concurrent request detected. Please retry.',
+      requestId
+    });
+  }
+
   let browser = null;
 
   try {
@@ -268,6 +336,9 @@ router.post('/', async (req, res) => {
 
     // If production mode submission failed, return error
     if (!isTestMode && !submitSuccess) {
+      // Mark as failed in idempotency store (allows retry)
+      markFailed(idempotencyKey, 'Form submission failed - submit button not found or submission error');
+
       return res.status(500).json({
         success: false,
         error: 'Form submission failed - submit button not found or submission error',
@@ -277,17 +348,27 @@ router.post('/', async (req, res) => {
       });
     }
 
-    res.json({
+    // Build success response
+    const successResponse = {
       success: true,
       message: isTestMode ? 'Form filled and cancelled successfully' : 'Form filled and submitted successfully',
       requestId,
       finalAction,
       isTestMode,
       screenshot_data: [screenshotResult]
-    });
+    };
+
+    // Mark as completed in idempotency store
+    markCompleted(idempotencyKey, successResponse);
+
+    res.json(successResponse);
 
   } catch (error) {
     logger.error('Form fill failed', { requestId, error: error.message, stack: error.stack });
+
+    // Mark as failed in idempotency store (allows retry)
+    markFailed(idempotencyKey, error.message || 'An unexpected error occurred');
+
     res.status(500).json({
       success: false,
       error: error.message || 'An unexpected error occurred',
