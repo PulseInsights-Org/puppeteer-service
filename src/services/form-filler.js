@@ -249,7 +249,7 @@ async function fillRfqForm(page, quoteDetails, requestId) {
 }
 
 async function cancelFormSubmission(page, requestId) {
-  logger.info('Cancelling form submission (TEST_MODE)', { requestId });
+  logger.info('Cancelling form submission', { requestId });
 
   try {
     const cancelled = await page.evaluate(() => {
@@ -270,92 +270,26 @@ async function cancelFormSubmission(page, requestId) {
     });
 
     if (cancelled) {
-      logger.info('FORM_CANCELLED: Cancel button clicked', { requestId });
+      logger.info('Cancel button clicked', { requestId });
       return;
     }
 
     logger.info('No cancel button found, pressing Escape', { requestId });
     await page.keyboard.press('Escape');
-    logger.info('FORM_CANCELLED: Escape key pressed', { requestId });
 
   } catch (error) {
     if (error.message?.includes('Execution context was destroyed') ||
         error.message?.includes('context was destroyed') ||
         error.message?.includes('Target closed')) {
-      logger.info('FORM_CANCELLED: Cancel triggered navigation (expected)', { requestId });
+      logger.info('Cancel triggered navigation (expected)', { requestId });
       return;
     }
     logger.warn('Cancel action failed', { requestId, error: error.message });
   }
 }
 
-async function submitForm(page, requestId) {
-  logger.info('Submitting form (PRODUCTION_MODE)', { requestId });
-
-  try {
-    // Find and click the submit button
-    const submitted = await page.evaluate(() => {
-      const buttons = Array.from(
-        document.querySelectorAll('button, input[type="button"], input[type="submit"]')
-      );
-
-      // Look for submit button (common patterns: "Submit", "Submit Quote", "Send", etc.)
-      const submitBtn = buttons.find((btn) => {
-        const text = (btn.textContent || btn.value || '').toLowerCase();
-        return (
-          text.includes('submit') ||
-          text.includes('send quote') ||
-          text.includes('send') ||
-          (btn.type === 'submit' && !text.includes('cancel'))
-        );
-      });
-
-      if (submitBtn) {
-        submitBtn.click();
-        return { success: true, buttonText: submitBtn.textContent || submitBtn.value };
-      }
-      return { success: false };
-    });
-
-    if (submitted.success) {
-      logger.info('FORM_SUBMITTED: Submit button clicked', {
-        requestId,
-        buttonText: submitted.buttonText
-      });
-
-      // Wait for navigation or confirmation after submission
-      try {
-        await Promise.race([
-          page.waitForNavigation({ timeout: 30000, waitUntil: 'load' }),
-          delay(5000) // Fallback timeout
-        ]);
-        logger.info('FORM_SUBMITTED: Post-submission navigation completed', { requestId });
-      } catch (navError) {
-        // Navigation timeout is acceptable - form may not navigate
-        logger.info('FORM_SUBMITTED: No post-submission navigation detected', { requestId });
-      }
-
-      return true;
-    }
-
-    logger.error('No submit button found on the form', { requestId });
-    return false;
-
-  } catch (error) {
-    if (error.message?.includes('Execution context was destroyed') ||
-        error.message?.includes('context was destroyed') ||
-        error.message?.includes('Target closed')) {
-      logger.info('FORM_SUBMITTED: Submit triggered navigation (expected)', { requestId });
-      return true;
-    }
-    logger.error('Form submission failed', { requestId, error: error.message });
-    return false;
-  }
-}
-
 module.exports = {
   fillRfqForm,
   cancelFormSubmission,
-  submitForm,
   delay
 };

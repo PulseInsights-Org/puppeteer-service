@@ -11,7 +11,7 @@ const logger = require('../utils/logger');
 const { validateRfqRequest } = require('../utils/validation');
 const { rateLimit } = require('../middleware/rate-limiter');
 const { launchBrowser, setupPage, closeBrowser, getShuttingDown } = require('../services/browser');
-const { fillRfqForm, cancelFormSubmission, submitForm, delay } = require('../services/form-filler');
+const { fillRfqForm, cancelFormSubmission, delay } = require('../services/form-filler');
 const { captureAndUploadScreenshot, isConfigured: isSupabaseConfigured } = require('../services/screenshot');
 
 // Apply rate limiting to this route
@@ -153,16 +153,8 @@ router.use((req, res, next) => {
  */
 router.post('/', async (req, res) => {
   const requestId = req.puppeteerId;
-  const { rfq_details, quote_details, keepOpen = false, isTestMode = true } = req.body;
+  const { rfq_details, quote_details, keepOpen = false } = req.body;
   const rfqId = req.header('X-RFQ-ID');
-
-  // Log execution mode (Single Source of Truth: isTestMode flag from RFQ Ingest Service)
-  logger.info('Execution mode received', {
-    requestId,
-    rfqId,
-    isTestMode,
-    mode: isTestMode ? 'TEST_MODE' : 'PRODUCTION_MODE'
-  });
 
   // Check Supabase configuration (required)
   if (!isSupabaseConfigured()) {
@@ -250,39 +242,12 @@ router.post('/', async (req, res) => {
 
     logger.info('Screenshot upload complete', { requestId, url: screenshotResult.url });
 
-    // Conditional form action based on isTestMode flag from RFQ Ingest Service
-    // isTestMode = true  → Cancel form (test mode, no downstream side effects)
-    // isTestMode = false → Submit form (production mode)
-    let finalAction;
-    let submitSuccess = true;
-
-    if (isTestMode) {
-      await cancelFormSubmission(page, requestId);
-      finalAction = 'FORM_CANCELLED';
-      logger.info('Final action: FORM_CANCELLED (test mode)', { requestId, rfqId });
-    } else {
-      submitSuccess = await submitForm(page, requestId);
-      finalAction = submitSuccess ? 'FORM_SUBMITTED' : 'FORM_SUBMISSION_FAILED';
-      logger.info(`Final action: ${finalAction} (production mode)`, { requestId, rfqId, submitSuccess });
-    }
-
-    // If production mode submission failed, return error
-    if (!isTestMode && !submitSuccess) {
-      return res.status(500).json({
-        success: false,
-        error: 'Form submission failed - submit button not found or submission error',
-        requestId,
-        finalAction,
-        screenshot_data: [screenshotResult]
-      });
-    }
+    await cancelFormSubmission(page, requestId);
 
     res.json({
       success: true,
-      message: isTestMode ? 'Form filled and cancelled successfully' : 'Form filled and submitted successfully',
+      message: 'Form filled and cancelled successfully',
       requestId,
-      finalAction,
-      isTestMode,
       screenshot_data: [screenshotResult]
     });
 
