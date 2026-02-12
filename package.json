@@ -10,9 +10,21 @@
     "test:watch": "cross-env NODE_ENV=test jest --watch",
     "test:coverage": "cross-env NODE_ENV=test jest --coverage",
     "test:unit": "cross-env NODE_ENV=test jest --testPathPattern=tests/unit",
-    "test:integration": "cross-env NODE_ENV=test jest --testPathPattern=tests/integration --testPathIgnorePatterns=[]"
+    "test:integration": "cross-env NODE_ENV=test jest --testPathPattern=tests/integration --testPathIgnorePatterns=[]",
+    "test:all": "cross-env NODE_ENV=test jest --testPathIgnorePatterns='/node_modules/' --coverage",
+    "test:ci": "cross-env NODE_ENV=test jest --coverage --forceExit",
+    "lint": "eslint src/ tests/ server.js --no-error-on-unmatched-pattern",
+    "lint:fix": "eslint src/ tests/ server.js --fix --no-error-on-unmatched-pattern",
+    "hooks:install": "bash scripts/install-hooks.sh",
+    "hooks:uninstall": "bash scripts/install-hooks.sh --remove",
+    "change-summary": "bash scripts/change-summary.sh",
+    "precommit": "bash scripts/pre-commit"
   },
-  "keywords": ["puppeteer", "automation", "rfq"],
+  "keywords": [
+    "puppeteer",
+    "automation",
+    "rfq"
+  ],
   "author": "",
   "license": "ISC",
   "engines": {
@@ -25,6 +37,7 @@
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
+    "eslint": "^8.57.1",
     "jest": "^29.7.0",
     "supertest": "^7.0.0"
   }

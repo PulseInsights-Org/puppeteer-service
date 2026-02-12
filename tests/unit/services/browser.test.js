@@ -2,19 +2,16 @@
  * Unit tests for browser service
  */
 
-const puppeteer = require('puppeteer');
-
 jest.mock('puppeteer');
 
 describe('Browser Service', () => {
   let browserService;
+  let puppeteer;
   let mockBrowser;
   let mockPage;
-  const originalEnv = process.env;
 
   beforeEach(() => {
     jest.resetModules();
-    process.env = { ...originalEnv, NODE_ENV: 'test' };
 
     mockPage = {
       setViewport: jest.fn().mockResolvedValue(undefined),
@@ -32,12 +29,12 @@ describe('Browser Service', () => {
       on: jest.fn()
     };
 
+    puppeteer = require('puppeteer');
     puppeteer.launch.mockResolvedValue(mockBrowser);
     browserService = require('../../../src/services/browser');
   });
 
   afterEach(() => {
-    process.env = originalEnv;
     jest.clearAllMocks();
   });
 
@@ -68,12 +65,22 @@ describe('Browser Service', () => {
       await browserService.launchBrowser('test-request-id');
 
       const launchCall = puppeteer.launch.mock.calls[0][0];
-      expect(launchCall.protocolTimeout).toBe(120000);
+      expect(launchCall.protocolTimeout).toBe(300000);
     });
 
     it('should register disconnected event handler', async () => {
       await browserService.launchBrowser('test-request-id');
       expect(mockBrowser.on).toHaveBeenCalledWith('disconnected', expect.any(Function));
+    });
+
+    it('should remove browser from active set on disconnect', async () => {
+      await browserService.launchBrowser('test-request-id');
+      const disconnectHandler = mockBrowser.on.mock.calls.find(c => c[0] === 'disconnected')[1];
+      disconnectHandler();
+      // After disconnect, closeAllBrowsers should have nothing to close
+      mockBrowser.close.mockClear();
+      await browserService.closeAllBrowsers();
+      expect(mockBrowser.close).not.toHaveBeenCalled();
     });
   });
 
@@ -116,8 +123,8 @@ describe('Browser Service', () => {
       const browser = await browserService.launchBrowser('test-request-id');
       await browserService.setupPage(browser, 'test-request-id');
 
-      expect(mockPage.setDefaultTimeout).toHaveBeenCalledWith(60000);
-      expect(mockPage.setDefaultNavigationTimeout).toHaveBeenCalledWith(60000);
+      expect(mockPage.setDefaultTimeout).toHaveBeenCalledWith(120000);
+      expect(mockPage.setDefaultNavigationTimeout).toHaveBeenCalledWith(120000);
     });
 
     it('should register request failed handler', async () => {
@@ -137,10 +144,9 @@ describe('Browser Service', () => {
     });
 
     it('should handle close errors gracefully', async () => {
-      mockBrowser.close.mockRejectedValue(new Error('Close failed'));
+      mockBrowser.close.mockRejectedValueOnce(new Error('Close failed'));
 
       const browser = await browserService.launchBrowser('test-request-id');
-      // Should not throw
       await expect(browserService.closeBrowser(browser, 'test-request-id')).resolves.toBeUndefined();
     });
   });
@@ -151,23 +157,19 @@ describe('Browser Service', () => {
 
       await browserService.closeAllBrowsers();
 
-      // Close should have been called
       expect(mockBrowser.close).toHaveBeenCalled();
     });
 
     it('should handle errors when closing browsers', async () => {
-      mockBrowser.close.mockRejectedValue(new Error('Close failed'));
-
       await browserService.launchBrowser('test-request-1');
+      mockBrowser.close.mockRejectedValueOnce(new Error('Close failed'));
 
-      // Should not throw
       await expect(browserService.closeAllBrowsers()).resolves.toBeUndefined();
     });
   });
 
   describe('shutdown state management', () => {
     it('should track shutting down state', () => {
-      // Start with current state
       const initialState = browserService.getShuttingDown();
       expect(typeof initialState).toBe('boolean');
     });
@@ -186,23 +188,11 @@ describe('Browser Service', () => {
 
   describe('constants', () => {
     it('should export DEFAULT_TIMEOUT', () => {
-      expect(browserService.DEFAULT_TIMEOUT).toBe(60000);
+      expect(browserService.DEFAULT_TIMEOUT).toBe(120000);
     });
 
     it('should export VIEWPORT dimensions', () => {
       expect(browserService.VIEWPORT).toEqual({ width: 1920, height: 1080 });
-    });
-  });
-
-  describe('production vs development mode', () => {
-    // These tests require complex module isolation to test properly
-    // The environment variables are read at module load time
-    it.skip('should use headless mode based on environment', async () => {
-      // Would need to fully isolate module loading to test this
-    });
-
-    it.skip('should include development-only flags in non-production', async () => {
-      // Would need to fully isolate module loading to test this
     });
   });
 });

@@ -1,0 +1,55 @@
+{
+  "env": {
+    "node": true,
+    "es2022": true,
+    "jest": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2022
+  },
+  "extends": [
+    "eslint:recommended"
+  ],
+  "rules": {
+    "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+    "no-console": "off",
+    "no-process-exit": "off",
+    "no-undef": "error",
+    "no-var": "error",
+    "prefer-const": "error",
+    "eqeqeq": ["error", "always"],
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "no-throw-literal": "error",
+    "no-return-await": "off",
+    "require-await": "warn",
+    "no-async-promise-executor": "error",
+    "no-promise-executor-return": "off",
+    "no-template-curly-in-string": "warn",
+    "array-callback-return": "error",
+    "no-constructor-return": "error",
+    "no-duplicate-imports": "error",
+    "no-self-compare": "error",
+    "no-unmodified-loop-condition": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["src/services/form-filler.js", "src/services/screenshot.js"],
+      "globals": {
+        "document": "readonly",
+        "window": "readonly"
+      },
+      "rules": {
+        "no-undef": "error"
+      }
+    },
+    {
+      "files": ["tests/**/*.js"],
+      "rules": {
+        "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+        "require-await": "off"
+      }
+    }
+  ]
+}
