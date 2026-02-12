@@ -30,9 +30,14 @@ jest.mock('../../src/services/screenshot', () => ({
   isConfigured: () => mockIsConfigured()
 }));
 
+jest.mock('../../src/middleware/rate-limiter', () => ({
+  rateLimit: () => (req, res, next) => next()
+}));
+
 jest.mock('../../src/services/form-filler', () => ({
   fillRfqForm: (...args) => mockFillRfqForm(...args),
   cancelFormSubmission: (...args) => mockCancelFormSubmission(...args),
+  submitForm: jest.fn().mockResolvedValue(true),
   delay: jest.fn().mockResolvedValue(undefined)
 }));
 
@@ -61,7 +66,7 @@ function createApp() {
       endpoints: {
         health: '/puppeteer/health',
         ready: '/puppeteer/ready',
-        fillRfq: 'POST /puppeteer/api/fill-rfq'
+        fillRfq: 'POST /puppeteer/fill-rfq'
       }
     });
   });
@@ -113,7 +118,7 @@ describe('API Endpoints', () => {
         endpoints: {
           health: '/puppeteer/health',
           ready: '/puppeteer/ready',
-          fillRfq: 'POST /puppeteer/api/fill-rfq'
+          fillRfq: 'POST /puppeteer/fill-rfq'
         }
       });
     });
@@ -200,7 +205,7 @@ describe('API Endpoints', () => {
     });
   });
 
-  describe('POST /puppeteer/api/fill-rfq', () => {
+  describe('POST /puppeteer/fill-rfq', () => {
     const validPayload = {
       rfq_details: {
         quote_submission_url: 'https://example.com/rfq-form'
@@ -224,7 +229,7 @@ describe('API Endpoints', () => {
     describe('validation', () => {
       it('should return 400 when X-RFQ-ID header is missing', async () => {
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .send(validPayload)
           .expect(400);
 
@@ -234,7 +239,7 @@ describe('API Endpoints', () => {
 
       it('should return 400 when body is empty', async () => {
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send({})
           .expect(400);
@@ -245,7 +250,7 @@ describe('API Endpoints', () => {
 
       it('should return 400 when rfq_details is missing', async () => {
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send({ quote_details: {} })
           .expect(400);
@@ -256,7 +261,7 @@ describe('API Endpoints', () => {
 
       it('should return 400 when quote_submission_url is missing', async () => {
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send({
             rfq_details: {},
@@ -270,7 +275,7 @@ describe('API Endpoints', () => {
 
       it('should return 400 when URL is invalid', async () => {
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send({
             rfq_details: { quote_submission_url: 'not-a-url' },
@@ -284,7 +289,7 @@ describe('API Endpoints', () => {
 
       it('should return 400 when items is not an array', async () => {
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send({
             rfq_details: { quote_submission_url: 'https://example.com/form' },
@@ -302,7 +307,7 @@ describe('API Endpoints', () => {
         mockIsConfigured.mockReturnValue(false);
 
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send(validPayload)
           .expect(503);
@@ -339,7 +344,7 @@ describe('API Endpoints', () => {
 
       it('should return 200 on successful form fill', async () => {
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send(validPayload)
           .expect(200);
@@ -353,7 +358,7 @@ describe('API Endpoints', () => {
 
       it('should include screenshot data in response', async () => {
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send(validPayload)
           .expect(200);
@@ -365,7 +370,7 @@ describe('API Endpoints', () => {
 
       it('should return X-Request-ID header', async () => {
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send(validPayload)
           .expect(200);
@@ -376,7 +381,7 @@ describe('API Endpoints', () => {
       it('should use provided X-Request-ID header', async () => {
         const customRequestId = 'custom-request-id-123';
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set({ ...validHeaders, 'X-Request-ID': customRequestId })
           .send(validPayload)
           .expect(200);
@@ -391,7 +396,7 @@ describe('API Endpoints', () => {
         mockLaunchBrowser.mockRejectedValue(new Error('Failed to launch browser'));
 
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send(validPayload)
           .expect(500);
@@ -415,7 +420,7 @@ describe('API Endpoints', () => {
         mockCloseBrowser.mockResolvedValue(undefined);
 
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send(validPayload)
           .expect(500);
@@ -441,7 +446,7 @@ describe('API Endpoints', () => {
         mockFillRfqForm.mockRejectedValue(new Error('Form fill failed'));
 
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send(validPayload)
           .expect(500);
@@ -467,7 +472,7 @@ describe('API Endpoints', () => {
         mockFillRfqForm.mockRejectedValue(new Error('Form fill failed'));
 
         await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send(validPayload)
           .expect(500);
@@ -481,7 +486,7 @@ describe('API Endpoints', () => {
         mockGetShuttingDown.mockReturnValue(true);
 
         const response = await request(app)
-          .post('/puppeteer/api/fill-rfq')
+          .post('/puppeteer/fill-rfq')
           .set(validHeaders)
           .send(validPayload)
           .expect(503);
@@ -523,7 +528,7 @@ describe('API Endpoints', () => {
   describe('CORS', () => {
     it('should handle OPTIONS preflight request', async () => {
       const response = await request(app)
-        .options('/puppeteer/api/fill-rfq')
+        .options('/puppeteer/fill-rfq')
         .expect(200);
 
       expect(response.headers['access-control-allow-origin']).toBeDefined();

@@ -12,8 +12,7 @@ module.exports = {
   testPathIgnorePatterns: [
     '/node_modules/',
     '/tests/integration/',                  // Integration tests - run with npm run test:integration
-    '/tests/e2e/',                          // E2E tests - run with npm run test:e2e
-    '/tests/unit/services/browser.test.js'  // Browser tests require mock isolation fix (see QUALITY_PLAN.md P0-1)
+    '/tests/e2e/'                           // E2E tests - run with npm run test:e2e
   ],
   setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
   testTimeout: 30000,
@@ -25,9 +24,9 @@ module.exports = {
   coverageThreshold: {
     global: {
       branches: 85,
-      functions: 85,
-      lines: 85,
-      statements: 85
+      functions: 93,
+      lines: 93,
+      statements: 93
     }
   },
 

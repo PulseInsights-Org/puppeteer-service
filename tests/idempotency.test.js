@@ -22,7 +22,7 @@ describe('Idempotency Service', () => {
   // Clear state before each test
   beforeEach(() => {
     // Reset internal state by removing all keys
-    const stats = getStats();
+    const _stats = getStats();
     // Note: In a real test, we'd want a reset function
   });
 
@@ -167,6 +167,33 @@ describe('Idempotency Service', () => {
 
       const canStart = startProcessing(key);
       expect(canStart).toBe(true);
+    });
+  });
+
+  describe('TTL expiry', () => {
+    test('expired records are removed by checkIdempotency', () => {
+      const key = generateIdempotencyKey('ttl-rfq-' + Date.now(), 'https://form.com', true);
+      startProcessing(key);
+
+      // Manually expire the record by manipulating createdAt
+      const record = checkIdempotency(key);
+      expect(record).not.toBeNull();
+
+      // Force expiry by setting createdAt to >24h ago
+      record.createdAt = Date.now() - (25 * 60 * 60 * 1000);
+
+      // Now checkIdempotency should return null (expired)
+      const expired = checkIdempotency(key);
+      expect(expired).toBeNull();
+    });
+
+    test('non-expired records are returned normally', () => {
+      const key = generateIdempotencyKey('fresh-rfq-' + Date.now(), 'https://form.com', true);
+      startProcessing(key);
+
+      const record = checkIdempotency(key);
+      expect(record).not.toBeNull();
+      expect(record.status).toBe('processing');
     });
   });
 });
