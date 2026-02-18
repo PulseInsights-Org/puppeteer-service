@@ -21,9 +21,10 @@ global.testUtils = {
     quote_details: {
       items: [
         {
+          conditionCode: 'NE',
           part_no: 'TEST-001',
           qty_available: '100',
-          traceability: 'NEW',
+          traceability: 'COFC',
           uom: 'EA',
           price_usd: '25.00',
           price_type: 'OUTRIGHT',

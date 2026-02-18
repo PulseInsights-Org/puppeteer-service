@@ -373,6 +373,80 @@ describe('Fill RFQ Route', () => {
     });
   });
 
+  describe('conditionCode integration', () => {
+    it('should pass items with conditionCode to fillRfqForm', async () => {
+      const payload = {
+        rfq_details: { quote_submission_url: 'https://example.com/rfq-form' },
+        quote_details: {
+          items: [
+            { conditionCode: 'NE', qty_available: '10', price_usd: '25.00' },
+            { conditionCode: 'SV', qty_available: '5', price_usd: '900.00' }
+          ]
+        }
+      };
+
+      await request(app)
+        .post('/fill-rfq')
+        .set(validHeaders)
+        .send(payload)
+        .expect(200);
+
+      expect(mockFillRfqForm).toHaveBeenCalledWith(
+        expect.anything(),
+        payload.quote_details,
+        expect.any(String)
+      );
+    });
+
+    it('should accept items without conditionCode (defaults to NE)', async () => {
+      await request(app)
+        .post('/fill-rfq')
+        .set(validHeaders)
+        .send(validPayload)
+        .expect(200);
+
+      expect(mockFillRfqForm).toHaveBeenCalled();
+    });
+
+    it('should return 400 for invalid conditionCode in items', async () => {
+      const response = await request(app)
+        .post('/fill-rfq')
+        .set(validHeaders)
+        .send({
+          rfq_details: { quote_submission_url: 'https://example.com/rfq-form' },
+          quote_details: {
+            items: [{ conditionCode: 'XX', qty_available: '10' }]
+          }
+        })
+        .expect(400);
+
+      expect(response.body.errors[0]).toContain('must be one of');
+    });
+
+    it('should accept all valid condition codes in items', async () => {
+      const payload = {
+        rfq_details: { quote_submission_url: 'https://example.com/rfq-form' },
+        quote_details: {
+          items: [
+            { conditionCode: 'NE', qty_available: '1' },
+            { conditionCode: 'NS', qty_available: '2' },
+            { conditionCode: 'OH', qty_available: '3' },
+            { conditionCode: 'SV', qty_available: '4' },
+            { conditionCode: 'AR', qty_available: '5' }
+          ]
+        }
+      };
+
+      await request(app)
+        .post('/fill-rfq')
+        .set(validHeaders)
+        .send(payload)
+        .expect(200);
+
+      expect(mockFillRfqForm).toHaveBeenCalled();
+    });
+  });
+
   describe('error handling', () => {
     it('should return 500 when browser launch fails', async () => {
       mockLaunchBrowser.mockRejectedValue(new Error('Launch failed'));

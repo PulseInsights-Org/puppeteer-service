@@ -50,7 +50,7 @@ describe('Form Filler Service', () => {
       jest.useRealTimers();
     });
 
-    it('should fill form with single item', async () => {
+    it('should fill form with single item (default NE condition)', async () => {
       const quoteDetails = {
         items: [
           {
@@ -70,16 +70,30 @@ describe('Form Filler Service', () => {
 
       await formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id');
 
-      // Should wait for fields and evaluate to fill them
+      // Should open other conditions section then fill fields
       expect(mockPage.waitForFunction).toHaveBeenCalled();
       expect(mockPage.evaluate).toHaveBeenCalled();
     });
 
-    it('should fill form with multiple items', async () => {
+    it('should fill form with explicit conditionCode', async () => {
       const quoteDetails = {
         items: [
-          { part_no: 'TEST-001', qty_available: '100' },
-          { part_no: 'TEST-002', qty_available: '200' }
+          { part_no: 'TEST-001', conditionCode: 'SV', qty_available: '5', price_usd: '900.00' }
+        ]
+      };
+
+      await formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id');
+
+      expect(mockPage.waitForFunction).toHaveBeenCalled();
+      expect(mockPage.evaluate).toHaveBeenCalled();
+    });
+
+    it('should fill form with multiple items across different conditions', async () => {
+      const quoteDetails = {
+        items: [
+          { part_no: 'TEST-001', conditionCode: 'NE', qty_available: '100' },
+          { part_no: 'TEST-001', conditionCode: 'SV', qty_available: '5' },
+          { part_no: 'TEST-001', conditionCode: 'AR', qty_available: '3' }
         ]
       };
 
@@ -115,7 +129,6 @@ describe('Form Filler Service', () => {
 
       await formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id');
 
-      // Should attempt to click outright radio button
       expect(mockPage.waitForFunction).toHaveBeenCalled();
     });
 
@@ -203,6 +216,45 @@ describe('Form Filler Service', () => {
       await expect(
         formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id')
       ).resolves.toBeUndefined();
+    });
+
+    it('should open other conditions section before filling items', async () => {
+      // Track evaluate calls: first should be the button click
+      mockPage.evaluate.mockResolvedValueOnce({ clicked: true, text: 'Code Other Conditions' });
+
+      const quoteDetails = {
+        items: [{ part_no: 'TEST-001', conditionCode: 'SV', qty_available: '5' }]
+      };
+
+      await formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id');
+
+      // First evaluate call is for opening the section
+      expect(mockPage.evaluate).toHaveBeenCalled();
+    });
+
+    it('should track per-condition index for multiple items with same code', async () => {
+      const quoteDetails = {
+        items: [
+          { part_no: 'TEST-001', conditionCode: 'NE', qty_available: '10' },
+          { part_no: 'TEST-002', conditionCode: 'NE', qty_available: '20' }
+        ]
+      };
+
+      await formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id');
+
+      // Both items should be processed (waitForFunction called for each)
+      expect(mockPage.waitForFunction.mock.calls.length).toBeGreaterThan(1);
+    });
+
+    it('should default conditionCode to NE when not specified', async () => {
+      const quoteDetails = {
+        items: [{ part_no: 'TEST-001', qty_available: '100' }]
+      };
+
+      await formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id');
+
+      // Should use NE suffixes (default)
+      expect(mockPage.waitForFunction).toHaveBeenCalled();
     });
   });
 
@@ -390,8 +442,9 @@ describe('Form Filler Service', () => {
     it('should call page.select when dropdown has actualId', async () => {
       // Make waitForFunction resolve (element found)
       mockPage.waitForFunction.mockResolvedValue(undefined);
-      // First evaluate call returns actualId for the dropdown
+      // First evaluate call is openOtherConditionsSection, then field fills
       mockPage.evaluate
+        .mockResolvedValueOnce({ clicked: true, text: 'Code Other Conditions' })  // openOtherConditionsSection
         .mockResolvedValueOnce(undefined)  // fillRepeaterFieldBySuffix for qty
         .mockResolvedValueOnce('ctl00_ddlNETraceability1')  // selectDropdownBySuffix - get actualId
         .mockResolvedValueOnce(undefined);  // next field
@@ -696,6 +749,251 @@ describe('Form Filler Service', () => {
 
       await formFiller.fillRfqForm(domPage, quoteDetails, 'test-request-id');
       expect(domPage.waitForFunction).toHaveBeenCalled();
+    });
+  });
+
+  describe('fillRfqForm with condition codes via DOM', () => {
+    let domPage;
+
+    function createMockElement(tagName, id, opts = {}) {
+      return {
+        tagName, id,
+        value: opts.value || '',
+        textContent: opts.textContent || '',
+        type: opts.type || '',
+        removeAttribute: jest.fn(),
+        dispatchEvent: jest.fn(),
+        click: jest.fn()
+      };
+    }
+
+    beforeEach(() => {
+      jest.useRealTimers();
+
+      const conditionInputs = [
+        createMockElement('INPUT', 'ctl00_txtSVQty1', {}),
+        createMockElement('INPUT', 'ctl00_txtSVPrice1', {}),
+        createMockElement('INPUT', 'ctl00_txtSVLead1', {}),
+        createMockElement('INPUT', 'ctl00_txtSVDate1', {}),
+        createMockElement('INPUT', 'ctl00_txtSVMinQuantity1', {}),
+        createMockElement('INPUT', 'ctl00_txtSVComments1', {}),
+        createMockElement('INPUT', 'ctl00_txtSVUnitMeasure1', {}),
+        createMockElement('INPUT', 'ctl00_rbOutrightSV1', { type: 'radio' }),
+        createMockElement('INPUT', 'ctl00_rbExchangeSV1', { type: 'radio' }),
+        createMockElement('INPUT', 'ctl00_txtARQty1', {}),
+        createMockElement('INPUT', 'ctl00_txtARPrice1', {})
+      ];
+
+      const selectElements = [
+        createMockElement('SELECT', 'ctl00_ddlSVTraceability1', {})
+      ];
+
+      const buttonElements = [
+        createMockElement('BUTTON', 'btnOtherCond', { textContent: 'Code Other Conditions' })
+      ];
+
+      const allElements = [...conditionInputs, ...selectElements, ...buttonElements];
+
+      global.document = {
+        querySelectorAll: jest.fn((selector) => {
+          if (selector === 'input') return conditionInputs;
+          if (selector === 'select') return selectElements;
+          if (selector.includes('button')) return [...buttonElements, ...conditionInputs];
+          return allElements;
+        }),
+        getElementById: jest.fn((id) => allElements.find(el => el.id === id) || null)
+      };
+      global.Event = class Event { constructor(type, opts) { this.type = type; this.bubbles = opts?.bubbles; } };
+
+      domPage = {
+        waitForFunction: jest.fn(async (fn, opts, ...args) => {
+          const result = typeof fn === 'function' ? fn(...args) : fn;
+          if (!result) throw new Error('waitForFunction condition not met');
+          return result;
+        }),
+        evaluate: jest.fn(async (fn, ...args) => {
+          if (typeof fn === 'function') return fn(...args);
+          return undefined;
+        }),
+        select: jest.fn().mockResolvedValue(undefined),
+        keyboard: { press: jest.fn().mockResolvedValue(undefined) }
+      };
+    });
+
+    afterEach(() => {
+      delete global.document;
+      delete global.Event;
+    });
+
+    it('should open section and fill SV condition item via DOM', async () => {
+      const quoteDetails = {
+        items: [
+          {
+            conditionCode: 'SV',
+            qty_available: '1',
+            price_usd: '900.00',
+            price_type: 'OUTRIGHT',
+            lead_time: '7 days',
+            comments: 'Test SV'
+          }
+        ]
+      };
+
+      await formFiller.fillRfqForm(domPage, quoteDetails, 'test-request-id');
+
+      const qtyField = global.document.querySelectorAll('input')
+        .find(el => el.id.includes('txtSVQty1'));
+      expect(qtyField.value).toBe('1');
+
+      const priceField = global.document.querySelectorAll('input')
+        .find(el => el.id.includes('txtSVPrice1'));
+      expect(priceField.value).toBe('900.00');
+
+      const outrightRadio = global.document.querySelectorAll('input')
+        .find(el => el.id.includes('rbOutrightSV1'));
+      expect(outrightRadio.click).toHaveBeenCalled();
+    });
+
+    it('should fill multiple condition codes (SV + AR) via DOM', async () => {
+      const quoteDetails = {
+        items: [
+          { conditionCode: 'SV', qty_available: '1', price_usd: '900.00' },
+          { conditionCode: 'AR', qty_available: '3', price_usd: '500.00' }
+        ]
+      };
+
+      await formFiller.fillRfqForm(domPage, quoteDetails, 'test-request-id');
+
+      const svQty = global.document.querySelectorAll('input')
+        .find(el => el.id.includes('txtSVQty1'));
+      expect(svQty.value).toBe('1');
+
+      const arQty = global.document.querySelectorAll('input')
+        .find(el => el.id.includes('txtARQty1'));
+      expect(arQty.value).toBe('3');
+    });
+
+    it('should handle EXCHANGE price type via DOM', async () => {
+      const quoteDetails = {
+        items: [
+          { conditionCode: 'SV', price_type: 'EXCHANGE' }
+        ]
+      };
+
+      await formFiller.fillRfqForm(domPage, quoteDetails, 'test-request-id');
+
+      const exchangeRadio = global.document.querySelectorAll('input')
+        .find(el => el.id.includes('rbExchangeSV1'));
+      expect(exchangeRadio.click).toHaveBeenCalled();
+    });
+  });
+
+  describe('error path coverage', () => {
+    beforeEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('should handle selectDropdownBySuffix error gracefully', async () => {
+      // waitForFunction rejects for dropdown -> catch block (line 80)
+      mockPage.waitForFunction
+        .mockResolvedValueOnce(undefined)  // fillRepeaterFieldBySuffix qty succeeds
+        .mockRejectedValueOnce(new Error('Dropdown not found'));  // selectDropdownBySuffix fails
+      mockPage.evaluate
+        .mockResolvedValueOnce({ clicked: true, text: 'Code Other Conditions' })  // openOtherConditionsSection
+        .mockResolvedValueOnce(undefined);  // fillRepeaterFieldBySuffix for qty
+
+      const quoteDetails = {
+        items: [{ qty_available: '10', traceability: 'COFC' }]
+      };
+
+      // Should not throw - error is caught and logged
+      await expect(
+        formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id')
+      ).resolves.toBeUndefined();
+    });
+
+    it('should handle clickElementBySuffix error gracefully', async () => {
+      // All waitForFunction calls resolve except the one for radio button
+      mockPage.waitForFunction.mockResolvedValue(undefined);
+      mockPage.evaluate
+        .mockResolvedValueOnce({ clicked: true, text: 'Code Other Conditions' })
+        .mockResolvedValue(undefined);
+
+      // Make the click radio button's waitForFunction fail
+      let callCount = 0;
+      mockPage.waitForFunction.mockImplementation(async () => {
+        callCount++;
+        // Fail on the radio button click attempt (after qty, traceability, uom, price)
+        if (callCount === 5) throw new Error('Radio not found');
+        return undefined;
+      });
+
+      const quoteDetails = {
+        items: [{ qty_available: '10', price_type: 'OUTRIGHT' }]
+      };
+
+      await expect(
+        formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id')
+      ).resolves.toBeUndefined();
+    });
+
+    it('should handle fillTextareaBySuffix error gracefully', async () => {
+      // waitForFunction rejects for textarea -> catch block (line 136)
+      mockPage.waitForFunction.mockRejectedValue(new Error('Textarea not found'));
+      mockPage.evaluate.mockResolvedValue(undefined);
+
+      const quoteDetails = {
+        items: [],
+        supplier_comments: 'Test comment'
+      };
+
+      await expect(
+        formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id')
+      ).resolves.toBeUndefined();
+    });
+
+    it('should handle fillInputBySuffix error gracefully', async () => {
+      // evaluate rejects for input -> catch block (line 188)
+      mockPage.evaluate.mockRejectedValue(new Error('Input not found'));
+
+      const quoteDetails = {
+        items: [],
+        quote_prepared_by: 'Test User'
+      };
+
+      await expect(
+        formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id')
+      ).resolves.toBeUndefined();
+    });
+
+    it('should handle openOtherConditionsSection when button not found', async () => {
+      // evaluate returns { clicked: false } -> warn logged
+      mockPage.evaluate.mockResolvedValueOnce({ clicked: false });
+      mockPage.waitForFunction.mockResolvedValue(undefined);
+
+      const quoteDetails = {
+        items: [{ qty_available: '5' }]
+      };
+
+      await expect(
+        formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id')
+      ).resolves.toBeUndefined();
+    });
+
+    it('should handle openOtherConditionsSection evaluate error', async () => {
+      // evaluate throws -> catch block in openOtherConditionsSection
+      mockPage.evaluate
+        .mockRejectedValueOnce(new Error('Page crashed'))
+        .mockResolvedValue(undefined);
+      mockPage.waitForFunction.mockResolvedValue(undefined);
+
+      const quoteDetails = {
+        items: [{ qty_available: '5' }]
+      };
+
+      await expect(
+        formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id')
+      ).resolves.toBeUndefined();
     });
   });
 

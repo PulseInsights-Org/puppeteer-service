@@ -184,6 +184,7 @@ erDiagram
     }
 
     ITEM {
+        string conditionCode
         string part_no
         string qty_available
         string traceability

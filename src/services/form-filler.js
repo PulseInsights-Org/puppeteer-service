@@ -193,44 +193,69 @@ async function fillInputBySuffix(page, suffix, value) {
 // MAIN FORM FILLING
 // =============================================================================
 
+/**
+ * Fill a single item row using its conditionCode to determine DOM suffixes.
+ * Defaults to 'NE' if conditionCode is not specified.
+ */
+async function fillItemRow(page, item, index, requestId) {
+  const code = (item.conditionCode || 'NE').toUpperCase();
+  const formattedTagDate = formatTagDate(item.tag_date);
+
+  logger.debug(`Filling item row ${index + 1} [${code}]`, { requestId, partNo: item.part_no || 'unknown' });
+
+  await fillRepeaterFieldBySuffix(page, `txt${code}Qty1`, index, item.qty_available);
+  await selectDropdownBySuffix(page, `ddl${code}Traceability1`, index, item.traceability);
+  await fillRepeaterFieldBySuffix(page, `txt${code}UnitMeasure1`, index, item.uom);
+  await fillRepeaterFieldBySuffix(page, `txt${code}Price1`, index, item.price_usd);
+
+  if (item.price_type) {
+    const priceTypeLower = item.price_type.toLowerCase();
+    if (priceTypeLower === 'outright') {
+      await clickElementBySuffix(page, `rbOutright${code}1`, index);
+    } else if (priceTypeLower === 'exchange') {
+      await clickElementBySuffix(page, `rbExchange${code}1`, index);
+    }
+  }
+
+  await fillRepeaterFieldBySuffix(page, `txt${code}Lead1`, index, item.lead_time);
+  await fillRepeaterFieldBySuffix(page, `txt${code}Date1`, index, formattedTagDate, { removeReadonly: true });
+  await fillRepeaterFieldBySuffix(page, `txt${code}MinQuantity1`, index, item.min_qty);
+
+  if (item.comments) {
+    await fillRepeaterFieldBySuffix(page, `txt${code}Comments1`, index, item.comments);
+  }
+
+  logger.debug(`Completed item row ${index + 1} [${code}]`, { requestId });
+}
+
 async function fillRfqForm(page, quoteDetails, requestId) {
   const { items, supplier_comments, quote_prepared_by } = quoteDetails;
 
   if (items && items.length > 0) {
-    logger.info(`Filling ${items.length} part(s)`, { requestId });
+    logger.info(`Filling ${items.length} item(s)`, { requestId });
+
+    // Always open "Code Other Conditions" section to reveal all condition rows
+    await openOtherConditionsSection(page, requestId);
+
+    // Group items by conditionCode to track per-code index
+    const codeIndexMap = {};
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const formattedTagDate = formatTagDate(item.tag_date);
-
-      logger.debug(`Processing part ${i + 1}`, { requestId, partNo: item.part_no || 'unknown' });
 
       if (item.no_quote) {
-        logger.debug(`Skipping part (no_quote: true)`, { requestId, index: i });
+        logger.debug(`Skipping item (no_quote: true)`, { requestId, index: i });
         continue;
       }
 
-      await fillRepeaterFieldBySuffix(page, 'txtNEQty1', i, item.qty_available);
-      await selectDropdownBySuffix(page, 'ddlNETraceability1', i, item.traceability);
-      await fillRepeaterFieldBySuffix(page, 'txtNEUnitMeasure1', i, item.uom);
-      await fillRepeaterFieldBySuffix(page, 'txtNEPrice1', i, item.price_usd);
+      const code = (item.conditionCode || 'NE').toUpperCase();
 
-      if (item.price_type) {
-        const priceTypeLower = item.price_type.toLowerCase();
-        if (priceTypeLower === 'outright') {
-          await clickElementBySuffix(page, 'rbOutrightNE1', i);
-        } else if (priceTypeLower === 'exchange') {
-          await clickElementBySuffix(page, 'rbExchangeNE1', i);
-        }
+      if (!codeIndexMap[code]) {
+        codeIndexMap[code] = 0;
       }
 
-      await fillRepeaterFieldBySuffix(page, 'txtNELead1', i, item.lead_time);
-      await fillRepeaterFieldBySuffix(page, 'txtNEDate1', i, formattedTagDate, { removeReadonly: true });
-      await fillRepeaterFieldBySuffix(page, 'txtNEMinQuantity1', i, item.min_qty);
-
-      if (item.comments) {
-        await fillRepeaterFieldBySuffix(page, 'txtNEComments1', i, item.comments);
-      }
+      await fillItemRow(page, item, codeIndexMap[code], requestId);
+      codeIndexMap[code]++;
     }
   }
 
@@ -286,6 +311,52 @@ async function cancelFormSubmission(page, requestId) {
       return;
     }
     logger.warn('Cancel action failed', { requestId, error: error.message });
+  }
+}
+
+// =============================================================================
+// "CODE OTHER CONDITIONS" SECTION
+// =============================================================================
+
+/**
+ * Click the "Code Other Conditions" button to reveal all condition rows.
+ * Called automatically at the start of fillRfqForm.
+ */
+async function openOtherConditionsSection(page, requestId) {
+  try {
+    const clicked = await page.evaluate(() => {
+      const elements = Array.from(
+        document.querySelectorAll('button, a, input[type="button"], input[type="submit"], span, td, div')
+      );
+
+      const btn = elements.find((el) => {
+        const text = (el.textContent || el.value || '').trim().toLowerCase();
+        return text.includes('code other condition') || text.includes('other condition');
+      });
+
+      if (btn) {
+        btn.click();
+        return { clicked: true, text: (btn.textContent || btn.value || '').trim() };
+      }
+      return { clicked: false };
+    });
+
+    if (!clicked.clicked) {
+      logger.warn('Could not find "Code Other Conditions" button', { requestId });
+      return false;
+    }
+
+    logger.debug('Clicked "Code Other Conditions" button', { requestId, buttonText: clicked.text });
+
+    // Wait for the section to render
+    await delay(1000);
+
+    return true;
+  } catch (error) {
+    logger.warn('Failed to open "Code Other Conditions" section', {
+      requestId, error: error.message
+    });
+    return false;
   }
 }
 

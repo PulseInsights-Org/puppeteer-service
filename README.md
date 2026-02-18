@@ -193,9 +193,10 @@ flowchart TD
   "quote_details": {
     "items": [
       {
+        "conditionCode": "NE",
         "part_no": "ABC-123",
         "qty_available": "100",
-        "traceability": "NEW",
+        "traceability": "COFC",
         "uom": "EA",
         "price_usd": "25.00",
         "price_type": "OUTRIGHT",
@@ -204,6 +205,15 @@ flowchart TD
         "min_qty": 10,
         "comments": "Ready to ship",
         "no_quote": false
+      },
+      {
+        "conditionCode": "SV",
+        "part_no": "ABC-123",
+        "qty_available": "5",
+        "traceability": "8130",
+        "price_usd": "900.00",
+        "price_type": "OUTRIGHT",
+        "lead_time": "10 days"
       }
     ],
     "supplier_comments": "Contact for bulk pricing",
@@ -225,19 +235,36 @@ flowchart TD
 | `503` | Supabase not configured or service shutting down |
 | `500` | Browser launch failure, navigation failure, or form fill error |
 
-**ASP.NET Field Mapping:**
+**Item Fields (all optional except `conditionCode` determines row targeting):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `conditionCode` | `string` | Condition code: `NE`, `NS`, `OH`, `SV`, `AR` (defaults to `NE` if omitted) |
+| `part_no` | `string` | Part number (for logging only) |
+| `qty_available` | `string` | Quantity available |
+| `traceability` | `string` | Traceability dropdown value (use `<option value>`, e.g., `COFC`, `8130`, `OEM`) |
+| `uom` | `string` | Unit of measure |
+| `price_usd` | `string` | Price in USD |
+| `price_type` | `string` | `OUTRIGHT` or `EXCHANGE` (radio button) |
+| `lead_time` | `string` | Lead time |
+| `tag_date` | `string` | Tag date (auto-formatted to `MMM-DD-YYYY`) |
+| `min_qty` | `number` | Minimum order quantity |
+| `comments` | `string` | Item-level comments |
+| `no_quote` | `boolean` | If `true`, skips this item |
+
+**ASP.NET Field Mapping (suffix pattern: `{code}` = conditionCode):**
 
 | Field | Form Suffix | Type |
 |-------|-------------|------|
-| Quantity | `txtNEQty1` | Repeater input |
-| Traceability | `ddlNETraceability1` | Dropdown |
-| UOM | `txtNEUnitMeasure1` | Repeater input |
-| Price | `txtNEPrice1` | Repeater input |
-| Price Type | `rbOutrightNE1` / `rbExchangeNE1` | Radio button |
-| Lead Time | `txtNELead1` | Repeater input |
-| Tag Date | `txtNEDate1` | Repeater input (MMM-DD-YYYY) |
-| Min Quantity | `txtNEMinQuantity1` | Repeater input |
-| Comments | `txtNEComments1` | Repeater input |
+| Quantity | `txt{code}Qty1` | Repeater input |
+| Traceability | `ddl{code}Traceability1` | Dropdown |
+| UOM | `txt{code}UnitMeasure1` | Repeater input |
+| Price | `txt{code}Price1` | Repeater input |
+| Price Type | `rbOutright{code}1` / `rbExchange{code}1` | Radio button |
+| Lead Time | `txt{code}Lead1` | Repeater input |
+| Tag Date | `txt{code}Date1` | Repeater input (MMM-DD-YYYY) |
+| Min Quantity | `txt{code}MinQuantity1` | Repeater input |
+| Comments | `txt{code}Comments1` | Repeater input |
 | Supplier Comments | `txtComments` | Textarea |
 | Prepared By | `quotePreparedBy` | Input |
 

@@ -32,7 +32,6 @@ async function launchBrowser(requestId) {
       '--disable-default-apps',
       '--disable-sync',
       '--no-first-run',
-      '--single-process',
       '--disable-software-rasterizer',
       '--disable-background-timer-throttling',
       '--disable-backgrounding-occluded-windows',

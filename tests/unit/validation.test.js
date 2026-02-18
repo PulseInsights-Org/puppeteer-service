@@ -2,7 +2,7 @@
  * Unit tests for validation utility
  */
 
-const { validateRfqRequest, formatTagDate } = require('../../src/utils/validation');
+const { validateRfqRequest, formatTagDate, VALID_CONDITION_CODES } = require('../../src/utils/validation');
 
 describe('Validation Utility', () => {
   describe('validateRfqRequest', () => {
@@ -106,6 +106,104 @@ describe('Validation Utility', () => {
       });
     });
 
+    describe('conditionCode in items validation', () => {
+      const validBase = {
+        rfq_details: { quote_submission_url: 'https://example.com/form' },
+        quote_details: {}
+      };
+
+      it('should accept items without conditionCode (defaults to NE)', () => {
+        const errors = validateRfqRequest({
+          ...validBase,
+          quote_details: {
+            items: [{ qty_available: '10', price_usd: '25.00' }]
+          }
+        });
+        expect(errors).toHaveLength(0);
+      });
+
+      it('should accept items with valid conditionCode', () => {
+        const errors = validateRfqRequest({
+          ...validBase,
+          quote_details: {
+            items: [
+              { conditionCode: 'NE', qty_available: '2', price_usd: '1500.00' },
+              { conditionCode: 'SV', qty_available: '1', price_usd: '900.00' }
+            ]
+          }
+        });
+        expect(errors).toHaveLength(0);
+      });
+
+      it('should return error for invalid conditionCode', () => {
+        const errors = validateRfqRequest({
+          ...validBase,
+          quote_details: {
+            items: [{ conditionCode: 'XX', qty_available: '5' }]
+          }
+        });
+        expect(errors).toContain('quote_details.items[0].conditionCode must be one of: NE, NS, OH, SV, AR');
+      });
+
+      it('should validate multiple items and report correct indices', () => {
+        const errors = validateRfqRequest({
+          ...validBase,
+          quote_details: {
+            items: [
+              { conditionCode: 'NE', qty_available: '10' },
+              { conditionCode: 'ZZ', qty_available: '5' }
+            ]
+          }
+        });
+        expect(errors).toHaveLength(1);
+        expect(errors).toContain('quote_details.items[1].conditionCode must be one of: NE, NS, OH, SV, AR');
+      });
+
+      it('should accept all valid condition codes', () => {
+        const allCodes = ['NE', 'NS', 'OH', 'SV', 'AR'];
+        const errors = validateRfqRequest({
+          ...validBase,
+          quote_details: {
+            items: allCodes.map(code => ({ conditionCode: code, qty_available: '1' }))
+          }
+        });
+        expect(errors).toHaveLength(0);
+      });
+
+      it('should accept lowercase condition codes', () => {
+        const errors = validateRfqRequest({
+          ...validBase,
+          quote_details: {
+            items: [
+              { conditionCode: 'ne', qty_available: '1' },
+              { conditionCode: 'sv', qty_available: '2' }
+            ]
+          }
+        });
+        expect(errors).toHaveLength(0);
+      });
+
+      it('should return error for empty string conditionCode', () => {
+        const errors = validateRfqRequest({
+          ...validBase,
+          quote_details: {
+            items: [{ conditionCode: '', qty_available: '5' }]
+          }
+        });
+        expect(errors).toContain('quote_details.items[0].conditionCode must be a non-empty string');
+      });
+
+      it('should return error for non-string conditionCode', () => {
+        const errors = validateRfqRequest({
+          ...validBase,
+          quote_details: {
+            items: [{ conditionCode: 123, qty_available: '5' }]
+          }
+        });
+        expect(errors).toContain('quote_details.items[0].conditionCode must be a non-empty string');
+      });
+    });
+
     describe('valid request', () => {
       it('should return empty array for valid complete request', () => {
         const errors = validateRfqRequest({
@@ -132,6 +230,12 @@ describe('Validation Utility', () => {
         });
         expect(errors).toHaveLength(0);
       });
+    });
+  });
+
+  describe('VALID_CONDITION_CODES', () => {
+    it('should export the expected condition codes', () => {
+      expect(VALID_CONDITION_CODES).toEqual(['NE', 'NS', 'OH', 'SV', 'AR']);
     });
   });
 
