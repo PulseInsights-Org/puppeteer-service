@@ -3,6 +3,8 @@
  * Validates incoming RFQ fill requests
  */
 
+const VALID_CONDITION_CODES = ['NE', 'NS', 'OH', 'SV', 'AR'];
+
 function validateRfqRequest(body) {
   const errors = [];
 
@@ -30,6 +32,17 @@ function validateRfqRequest(body) {
     errors.push('quote_details is required');
   } else if (body.quote_details.items && !Array.isArray(body.quote_details.items)) {
     errors.push('quote_details.items must be an array');
+  } else if (Array.isArray(body.quote_details.items)) {
+    // Validate conditionCode on each item if present
+    body.quote_details.items.forEach((item, index) => {
+      if (item.conditionCode !== undefined) {
+        if (typeof item.conditionCode !== 'string' || item.conditionCode.trim() === '') {
+          errors.push(`quote_details.items[${index}].conditionCode must be a non-empty string`);
+        } else if (!VALID_CONDITION_CODES.includes(item.conditionCode.toUpperCase())) {
+          errors.push(`quote_details.items[${index}].conditionCode must be one of: ${VALID_CONDITION_CODES.join(', ')}`);
+        }
+      }
+    });
   }
 
   return errors;
@@ -60,5 +73,6 @@ function formatTagDate(value) {
 
 module.exports = {
   validateRfqRequest,
-  formatTagDate
+  formatTagDate,
+  VALID_CONDITION_CODES
 };

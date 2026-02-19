@@ -103,6 +103,11 @@ router.use((req, res, next) => {
  *                     items:
  *                       type: object
  *                       properties:
+ *                         conditionCode:
+ *                           type: string
+ *                           enum: [NE, NS, OH, SV, AR]
+ *                           default: NE
+ *                           description: Condition code determining which form row to fill
  *                         part_no:
  *                           type: string
  *                         qty_available:
