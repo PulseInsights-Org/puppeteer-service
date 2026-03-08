@@ -234,8 +234,8 @@ async function fillRfqForm(page, quoteDetails, requestId) {
   if (items && items.length > 0) {
     logger.info(`Filling ${items.length} item(s)`, { requestId });
 
-    // Always open "Code Other Conditions" section to reveal all condition rows
-    await openOtherConditionsSection(page, requestId);
+    // Only open "Quote Other Conditions" for products that have non-NE variants
+    await openOtherConditionsForProducts(page, items, requestId);
 
     // Group items by conditionCode to track per-code index
     const codeIndexMap = {};
@@ -319,42 +319,128 @@ async function cancelFormSubmission(page, requestId) {
 // =============================================================================
 
 /**
- * Click the "Code Other Conditions" button to reveal all condition rows.
- * Called automatically at the start of fillRfqForm.
+ * Determine which products need "Quote Other Conditions" expanded based on the
+ * payload items, then trigger a single ASP.NET postback to expand them all.
+ *
+ * The ILS form has one "Quote Other Conditions" submit button per product
+ * (repeater item). Clicking it triggers a server postback that re-renders the
+ * page with additional condition rows for that product. A hidden field
+ * (hdnClickId2) accepts comma-separated button IDs so the server can expand
+ * multiple products in a single round-trip.
+ *
+ * Strategy:
+ * 1. Group payload items by part_no to find which products have non-NE variants.
+ * 2. If none need it, skip entirely (zero postbacks).
+ * 3. Otherwise, find all "Quote Other Conditions" buttons on the page, set the
+ *    hidden field with the IDs of buttons for the relevant product indices,
+ *    click one button, and wait for the page to reload.
  */
-async function openOtherConditionsSection(page, requestId) {
-  try {
-    const clicked = await page.evaluate(() => {
-      const elements = Array.from(
-        document.querySelectorAll('button, a, input[type="button"], input[type="submit"], span, td, div')
-      );
+async function openOtherConditionsForProducts(page, items, requestId) {
+  // Determine which product indices need "other conditions" opened.
+  // Items are ordered by product: group by part_no to find per-product indices.
+  const productOrder = [];
+  const productsNeedingOther = new Set();
 
-      const btn = elements.find((el) => {
-        const text = (el.textContent || el.value || '').trim().toLowerCase();
-        return text.includes('code other condition') || text.includes('other condition');
+  for (const item of items) {
+    if (item.no_quote) continue;
+    const partNo = item.part_no || '';
+    const code = (item.conditionCode || 'NE').toUpperCase();
+
+    if (!productOrder.includes(partNo)) {
+      productOrder.push(partNo);
+    }
+
+    if (code !== 'NE') {
+      productsNeedingOther.add(partNo);
+    }
+  }
+
+  if (productsNeedingOther.size === 0) {
+    logger.debug('All items are NE condition — skipping "Quote Other Conditions"', { requestId });
+    return true;
+  }
+
+  // Map part numbers to product indices (0-based order on the form)
+  const targetIndices = [];
+  for (const partNo of productsNeedingOther) {
+    const idx = productOrder.indexOf(partNo);
+    if (idx >= 0) targetIndices.push(idx);
+  }
+
+  logger.info(`Opening "Quote Other Conditions" for ${targetIndices.length} product(s)`, {
+    requestId,
+    targetIndices,
+    parts: Array.from(productsNeedingOther),
+  });
+
+  try {
+    // Find all "Quote Other Conditions" buttons, set the hidden field with
+    // the IDs for targeted products, then click one to trigger the postback.
+    const result = await page.evaluate((targetIndices) => {
+      const buttons = Array.from(
+        document.querySelectorAll('input[type="submit"]')
+      ).filter((el) => {
+        const val = (el.value || '').toLowerCase();
+        return val.includes('quote other condition') || val.includes('other condition');
       });
 
-      if (btn) {
-        btn.click();
-        return { clicked: true, text: (btn.textContent || btn.value || '').trim() };
+      if (buttons.length === 0) {
+        return { clicked: false, reason: 'no buttons found' };
       }
-      return { clicked: false };
-    });
 
-    if (!clicked.clicked) {
-      logger.warn('Could not find "Code Other Conditions" button', { requestId });
+      // Collect IDs for the targeted product indices
+      const targetIds = [];
+      for (const idx of targetIndices) {
+        if (idx < buttons.length) {
+          targetIds.push(buttons[idx].id);
+        }
+      }
+
+      if (targetIds.length === 0) {
+        return { clicked: false, reason: 'no matching buttons for target indices' };
+      }
+
+      // Set hdnClickId2 with comma-separated button IDs so the server
+      // expands all targeted products in one postback.
+      const hdnField = document.getElementById('hdnClickId2');
+      if (hdnField) {
+        hdnField.value = targetIds.join(',');
+      }
+
+      // Click the first targeted button to trigger the postback
+      buttons[targetIndices[0]].click();
+
+      return { clicked: true, count: targetIds.length, ids: targetIds };
+    }, targetIndices);
+
+    if (!result.clicked) {
+      logger.warn('Could not open "Quote Other Conditions"', { requestId, reason: result.reason });
       return false;
     }
 
-    logger.debug('Clicked "Code Other Conditions" button', { requestId, buttonText: clicked.text });
+    logger.info(`Triggered "Quote Other Conditions" postback for ${result.count} product(s)`, {
+      requestId,
+      buttonIds: result.ids,
+    });
 
-    // Wait for the section to render
+    // Wait for the postback to complete (page reload)
+    try {
+      await page.waitForNavigation({ timeout: 30000, waitUntil: 'load' });
+    } catch {
+      logger.debug('No navigation detected after postback, waiting for network idle', { requestId });
+    }
+
+    await page.waitForNetworkIdle({ timeout: 15000 }).catch(() => {
+      logger.warn('Network idle timeout after "Quote Other Conditions" postback', { requestId });
+    });
+
+    // Allow the DOM to settle
     await delay(1000);
 
     return true;
   } catch (error) {
-    logger.warn('Failed to open "Code Other Conditions" section', {
-      requestId, error: error.message
+    logger.warn('Failed to open "Quote Other Conditions"', {
+      requestId, error: error.message,
     });
     return false;
   }
