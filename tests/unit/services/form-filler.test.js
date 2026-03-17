@@ -522,8 +522,8 @@ describe('Form Filler Service', () => {
 
       await formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id');
 
-      // Should have called evaluate to find and fill textarea
-      expect(mockPage.evaluate).toHaveBeenCalledTimes(2);
+      // Should have called evaluate to find textarea, fill it, and verify
+      expect(mockPage.evaluate).toHaveBeenCalledTimes(3);
     });
 
     it('should handle empty string values in repeater fields', async () => {
@@ -575,7 +575,7 @@ describe('Form Filler Service', () => {
         createMockElement('TEXTAREA', 'ctl00_txtComments', {})
       ];
       const buttonElements = [
-        createMockElement('BUTTON', 'btnSubmit', { textContent: 'Submit Quote', type: 'submit' }),
+        createMockElement('BUTTON', 'btnSubmit', { textContent: 'Send', type: 'submit' }),
         createMockElement('BUTTON', 'btnCancel', { textContent: 'Cancel' })
       ];
 
@@ -635,7 +635,7 @@ describe('Form Filler Service', () => {
 
     it('should execute selectDropdownBySuffix evaluate callbacks', async () => {
       const quoteDetails = {
-        items: [{ part_no: 'TEST-001', traceability: 'NEW' }]
+        items: [{ part_no: 'TEST-001', traceability: 'NEW', qty_available: '10' }]
       };
 
       await formFiller.fillRfqForm(domPage, quoteDetails, 'test-request-id');
@@ -645,7 +645,7 @@ describe('Form Filler Service', () => {
 
     it('should execute clickElementBySuffix for OUTRIGHT price type', async () => {
       const quoteDetails = {
-        items: [{ part_no: 'TEST-001', price_type: 'OUTRIGHT' }]
+        items: [{ part_no: 'TEST-001', price_type: 'OUTRIGHT', qty_available: '10' }]
       };
 
       await formFiller.fillRfqForm(domPage, quoteDetails, 'test-request-id');
@@ -657,7 +657,7 @@ describe('Form Filler Service', () => {
 
     it('should execute clickElementBySuffix for EXCHANGE price type', async () => {
       const quoteDetails = {
-        items: [{ part_no: 'TEST-001', price_type: 'EXCHANGE' }]
+        items: [{ part_no: 'TEST-001', price_type: 'EXCHANGE', qty_available: '10' }]
       };
 
       await formFiller.fillRfqForm(domPage, quoteDetails, 'test-request-id');
@@ -724,13 +724,11 @@ describe('Form Filler Service', () => {
     });
 
     it('should execute submitForm evaluate callbacks', async () => {
-      domPage.waitForNavigation = jest.fn().mockResolvedValue(undefined);
-
       const result = await formFiller.submitForm(domPage, 'test-request-id');
 
       expect(result).toBe(true);
       const submitBtn = global.document.querySelectorAll('button')
-        .find(btn => btn.textContent.toLowerCase().includes('submit'));
+        .find(btn => btn.textContent.toLowerCase().includes('send'));
       expect(submitBtn.click).toHaveBeenCalled();
     });
 
@@ -762,7 +760,7 @@ describe('Form Filler Service', () => {
       global.document.getElementById = jest.fn(() => null);
 
       const quoteDetails = {
-        items: [],
+        items: [{ part_no: 'TEST-001', qty_available: '10' }],
         quote_prepared_by: 'Jane Doe'
       };
 
@@ -1019,7 +1017,10 @@ describe('Form Filler Service', () => {
 
     it('should handle fillInputBySuffix error gracefully', async () => {
       // evaluate rejects for input -> catch block (line 188)
-      mockPage.evaluate.mockRejectedValue(new Error('Input not found'));
+      // then resolves for verification with filled count > 0
+      mockPage.evaluate
+        .mockRejectedValueOnce(new Error('Input not found'))
+        .mockResolvedValueOnce(1);
 
       const quoteDetails = {
         items: [],
