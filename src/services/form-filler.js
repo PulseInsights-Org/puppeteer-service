@@ -52,7 +52,7 @@ async function fillRepeaterFieldBySuffix(page, suffix, index, value, options = {
 
     logger.debug(`Filled suffix ${suffix}[${index}]`, { value: stringValue });
   } catch (error) {
-    logger.debug(`Skipped suffix ${suffix}[${index}]`, { error: error.message });
+    logger.warn(`Failed to fill suffix ${suffix}[${index}]`, { error: error.message });
   }
 }
 
@@ -77,7 +77,7 @@ async function selectDropdownBySuffix(page, suffix, index, value) {
       logger.debug(`Selected ${suffix}[${index}]`, { value });
     }
   } catch (error) {
-    logger.debug(`Skipped dropdown ${suffix}[${index}]`, { error: error.message });
+    logger.warn(`Failed to fill dropdown ${suffix}[${index}]`, { error: error.message });
   }
 }
 
@@ -100,7 +100,7 @@ async function clickElementBySuffix(page, suffix, index) {
 
     logger.debug(`Clicked ${suffix}[${index}]`);
   } catch (error) {
-    logger.debug(`Skipped click ${suffix}[${index}]`, { error: error.message });
+    logger.warn(`Failed to click ${suffix}[${index}]`, { error: error.message });
   }
 }
 
@@ -133,7 +133,7 @@ async function fillTextareaBySuffix(page, suffix, value) {
       logger.debug(`Filled textarea ${suffix}`);
     }
   } catch (error) {
-    logger.debug(`Skipped textarea ${suffix}`, { error: error.message });
+    logger.warn(`Failed to fill textarea ${suffix}`, { error: error.message });
   }
 }
 
@@ -185,7 +185,7 @@ async function fillInputBySuffix(page, suffix, value) {
       logger.debug(`Filled input ${suffix}`);
     }
   } catch (error) {
-    logger.debug(`Skipped input ${suffix}`, { error: error.message });
+    logger.warn(`Failed to fill input ${suffix}`, { error: error.message });
   }
 }
 
@@ -270,7 +270,25 @@ async function fillRfqForm(page, quoteDetails, requestId) {
   }
 
   await delay(2000);
-  logger.info('Form fill complete', { requestId });
+
+  // Verify that data was actually populated in the form
+  const filledCount = await page.evaluate(() => {
+    const inputs = Array.from(document.querySelectorAll('input[type="text"], textarea, select'));
+    let filled = 0;
+    for (const el of inputs) {
+      if (el.value && el.value.trim().length > 0 && el.type !== 'hidden') {
+        filled++;
+      }
+    }
+    return filled;
+  });
+
+  if (filledCount === 0) {
+    logger.error('FORM FILL VERIFICATION FAILED: No data was populated in the form', { requestId });
+    throw new Error('Form fill verification failed — no fields were populated. The form selectors may not match the page.');
+  }
+
+  logger.info(`Form fill complete (${filledCount} field(s) verified populated)`, { requestId });
 }
 
 async function cancelFormSubmission(page, requestId) {
@@ -446,59 +464,51 @@ async function openOtherConditionsForProducts(page, items, requestId) {
   }
 }
 
-async function submitForm(page, requestId) {
+/**
+ * Submit the form using the native ASP.NET form submit mechanism.
+ * This is intentionally simple and synchronous (fire-and-forget click)
+ * to avoid race conditions with async navigation handling.
+ *
+ * The function finds the specific "Submit Quote" button (not generic
+ * type="submit" buttons which include postback triggers like
+ * "Quote Other Conditions"), clicks it, and returns immediately.
+ */
+function submitForm(page, requestId) {
   logger.info('Submitting form (PRODUCTION_MODE)', { requestId });
 
-  try {
-    // Find and click the submit button
-    const submitted = await page.evaluate(() => {
-      const buttons = Array.from(
-        document.querySelectorAll('button, input[type="button"], input[type="submit"]')
-      );
+  // Use Promise chain instead of async/await — fire the click and
+  // treat navigation destruction as success.
+  return page.evaluate(() => {
+    // First, try to find the exact submit button by value/text.
+    // Be specific to avoid clicking ASP.NET postback buttons
+    // (e.g. "Quote Other Conditions") which would reload & wipe data.
+    const buttons = Array.from(
+      document.querySelectorAll('input[type="submit"], input[type="button"], button')
+    );
 
-      // Look for submit button (common patterns: "Submit", "Submit Quote", "Send", etc.)
-      const submitBtn = buttons.find((btn) => {
-        const text = (btn.textContent || btn.value || '').toLowerCase();
-        return (
-          text.includes('submit') ||
-          text.includes('send quote') ||
-          text.includes('send') ||
-          (btn.type === 'submit' && !text.includes('cancel'))
-        );
-      });
-
-      if (submitBtn) {
-        submitBtn.click();
-        return { success: true, buttonText: submitBtn.textContent || submitBtn.value };
-      }
-      return { success: false };
+    const submitBtn = buttons.find((btn) => {
+      const text = (btn.textContent || btn.value || '').trim().toLowerCase();
+      return text === 'send';
     });
 
-    if (submitted.success) {
-      logger.info('FORM_SUBMITTED: Submit button clicked', {
-        requestId,
-        buttonText: submitted.buttonText
-      });
-
-      // Wait for navigation or confirmation after submission
-      try {
-        await Promise.race([
-          page.waitForNavigation({ timeout: 30000, waitUntil: 'load' }),
-          delay(5000) // Fallback timeout
-        ]);
-        logger.info('FORM_SUBMITTED: Post-submission navigation completed', { requestId });
-      } catch (navError) {
-        // Navigation timeout is acceptable - form may not navigate
-        logger.info('FORM_SUBMITTED: No post-submission navigation detected', { requestId });
-      }
-
-      return true;
+    if (!submitBtn) {
+      return { success: false, reason: 'No submit button found' };
     }
 
-    logger.error('No submit button found on the form', { requestId });
+    submitBtn.click();
+    return { success: true, buttonText: submitBtn.textContent || submitBtn.value };
+  }).then((result) => {
+    if (result.success) {
+      logger.info('FORM_SUBMITTED: Submit button clicked', {
+        requestId,
+        buttonText: result.buttonText
+      });
+      return true;
+    }
+    logger.error('No submit button found on the form', { requestId, reason: result.reason });
     return false;
-
-  } catch (error) {
+  }).catch((error) => {
+    // Execution context destroyed means navigation happened — that's success
     if (error.message?.includes('Execution context was destroyed') ||
         error.message?.includes('context was destroyed') ||
         error.message?.includes('Target closed')) {
@@ -507,7 +517,7 @@ async function submitForm(page, requestId) {
     }
     logger.error('Form submission failed', { requestId, error: error.message });
     return false;
-  }
+  });
 }
 
 module.exports = {
