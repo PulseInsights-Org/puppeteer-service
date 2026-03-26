@@ -232,26 +232,34 @@ async function fillRfqForm(page, quoteDetails, requestId) {
   const { items, supplier_comments, quote_prepared_by } = quoteDetails;
 
   if (items && items.length > 0) {
-    logger.info(`Filling ${items.length} item(s)`, { requestId });
+    // Sort items by item_number to match ILS form row order
+    const sortedItems = [...items].sort((a, b) => {
+      const aNum = a.item_number || '';
+      const bNum = b.item_number || '';
+      return aNum.localeCompare(bNum);
+    });
+
+    logger.info(`Filling ${sortedItems.length} item(s)`, { requestId });
 
     // Only open "Quote Other Conditions" for products that have non-NE variants
-    await openOtherConditionsForProducts(page, items, requestId);
+    await openOtherConditionsForProducts(page, sortedItems, requestId);
 
     // Group items by conditionCode to track per-code index
     const codeIndexMap = {};
 
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-
-      if (item.no_quote) {
-        logger.debug(`Skipping item (no_quote: true)`, { requestId, index: i });
-        continue;
-      }
+    for (let i = 0; i < sortedItems.length; i++) {
+      const item = sortedItems[i];
 
       const code = (item.conditionCode || 'NE').toUpperCase();
 
       if (!codeIndexMap[code]) {
         codeIndexMap[code] = 0;
+      }
+
+      if (item.no_quote) {
+        logger.info(`Skipping item (no_quote: true), advancing form row index`, { requestId, index: i, code, formRowIndex: codeIndexMap[code] });
+        codeIndexMap[code]++;
+        continue;
       }
 
       await fillItemRow(page, item, codeIndexMap[code], requestId);

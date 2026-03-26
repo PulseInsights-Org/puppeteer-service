@@ -1,0 +1,105 @@
+============================================================
+BUG REPORT — RFQ ILSCS8W260320073215
+Date: 2026-03-26
+Reported by: Mahesh Bhide (mahesh.bhide@skynetparts.com)
+Investigated by: Engineering Team
+Status: FIXED (pending deployment)
+============================================================
+
+
+SUMMARY FOR MANAGER
+--------------------------------
+
+RFQ Bug — Root Cause Found & Fixed (ILSCS8W260320073215)
+
+What happened: The form-fill automation submitted wrong prices to the ILS portal. Part 14330-232-201 ($719) got listed as $29, part 14320-220 (should be No Quote) got listed as $719, and part 15800-229-1 ($29) was shown as No Quote. The email sent to the buyer was correct — only the ILS form submission had wrong data.
+
+Why it happened: Two issues working together:
+
+1. Our system sends the parts list in a different sequence than how ILS displays them on their form. The form fills top-to-bottom by position, so Part A's data ended up in Part B's row.
+
+2. When a part has zero stock (like 14320-220), our system was completely removing it from the list before filling the form. But the ILS form still has a row for that part. With the zero-stock part removed from our list, we only had 2 items to fill into a 3-row form — so everything shifted into the wrong position.
+
+The fix (implemented across both services):
+- Items are now sorted by their ILS item number before filling, so our order always matches the form
+- Zero-stock parts are now included in the form-fill list as "No Quote" placeholders instead of being removed, so the form-filler knows to skip their row without shifting everything else
+- The form-filler now correctly advances past "No Quote" rows instead of collapsing them
+
+Impact: This affects any RFQ where one or more parts in the middle of the list are unavailable. RFQs where all parts are quoted would not show this issue. All tests pass (243 puppeteer tests, 14 payload tests).
+
+
+SUMMARY FOR CLIENT
+------------------------------------
+
+Update on the incorrect quote issue (RFQ ILSCS8W260320073215)
+
+Hi team,
+
+I investigated the ILS form submission issue that showed incorrect prices for the 3 parts in this RFQ. Here is what i had found.
+
+What went wrong:
+
+The ILS portal lists parts in a specific order on the quote form : in this case, Item 04 (14330-232-201), then Item 05 (14320-220), then Item 06 (15800-229-1). Our system needs to fill each part's details into the correct row on this form.
+
+Two things went wrong at the same time:
+
+1. Our system was placing the parts in a different order than what ILS expects. [reverse order]
+2. Part 14320-220 had zero stock and should have been left blank (No Quote) on the form. However, instead of leaving that row empty and moving to the next one, our system skipped over it entirely as if that row didn't exist. This pushed the remaining parts up by one row, so 14330-232-201's price ($719) landed on 14320-220's row, and 15800-229-1's row was left empty (showing as No Quote).
+
+The fix: We have corrected both issues. Our system now:
+- Fills parts in the exact same order that ILS displays them on the form
+- Properly handles "No Quote" parts by leaving their row empty and moving to the correct next row, instead of shifting everything up
+
+
+DETAILED ROOT CAUSE ANALYSIS
+------------------------------
+
+Affected RFQ: ILSCS8W260320073215
+Affected Buyer: Cihat Kus, ASYA ASC AVIATION (purchasing@asyahavacilik.com)
+Processing Time: 2026-03-20 12:40:18 UTC
+Form URL: https://quote.ilsmart.com/Authenticate?8ALT-T6R8-H4W3
+Internal RFQ UUID: f58cedab-21c4-4ed5-a168-5956a74b57b0
+
+Parts involved:
+  - Item 04: 14330-232-201 (HOUSING ASSY BACK)  — Shopify price $719.00, inventory 9  — Should be quoted
+  - Item 05: 14320-220 (HOUSING ASSY FCU)        — Shopify price $1,692.00, inventory 0 — Should be No Quote
+  - Item 06: 15800-229-1 (SPONGE, RUBBER)        — Shopify price $29.00, inventory 30   — Should be quoted
+
+ILS form row order (by item number): [Item 04, Item 05, Item 06]
+Payload item order (from ingest service): [Item 06, Item 05, Item 04]
+Note: Item 05 (14320-220) was filtered out before reaching the form-filler (zero inventory).
+Actual payload sent to puppeteer: [Item 06 ($29), Item 04 ($719)] — only 2 items for a 3-row form.
+
+What the form-filler did:
+  1. items[0] (15800-229-1, $29) → filled form row 0 (Item 04 = 14330-232-201) → WRONG PART
+  2. items[1] (14330-232-201, $719) → filled form row 1 (Item 05 = 14320-220) → WRONG PART
+  3. Form row 2 (Item 06 = 15800-229-1) → never filled → ILS treated as No Quote → WRONG
+
+Result seen by buyer:
+  - Item 04 (14330-232-201): $29.00 — INCORRECT (should be $719.00, got 15800-229-1's price)
+  - Item 05 (14320-220): $719.00 — INCORRECT (should be No Quote, got 14330-232-201's price)
+  - Item 06 (15800-229-1): No Quote — INCORRECT (should be $29.00, row was never filled)
+
+Root causes:
+
+  Bug 1 — Order mismatch (rfq-ingest-service):
+    The payload sent items in LLM extraction order [Item 06, Item 04], not sorted by
+    ILS item number. The form rows are always in item-number order [Item 04, Item 05, Item 06].
+    FIX: Items are now sorted by item_number before building the payload.
+
+  Bug 2 — Excluded parts removed from payload (rfq-ingest-service):
+    Zero-inventory parts were filtered out entirely (available_parts_for_form), so the
+    form-filler received 2 items for a 3-row form. The missing placeholder caused all
+    items to shift into wrong rows.
+    FIX: All parts are now passed to the payload builder. Excluded parts become no_quote
+    placeholders so the form-filler can advance past their rows.
+
+  Bug 3 — no_quote index skip (puppeteer-service):
+    When a no_quote item was encountered, the form row index did not advance, causing
+    subsequent items to fill into the skipped item's row.
+    FIX: The form-filler now increments the row index for no_quote items before skipping.
+
+Files changed:
+  - rfq-ingest-service: app/services/rfq_worker.py (_build_puppeteer_payload, process_rfq, retry_form_fill)
+  - rfq-ingest-service: tests/test_puppeteer_payload_variants.py (updated fixtures)
+  - puppeteer-service: src/services/form-filler.js (fillRfqForm — sort + index advance)
