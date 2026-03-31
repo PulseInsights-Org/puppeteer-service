@@ -76,45 +76,47 @@ async function fetchValidatedQuoteData(items, requestId) {
  * Read back all field values for a single item row from the form DOM.
  * Single page.evaluate per row for minimal IPC overhead.
  */
-async function readbackItemRow(page, conditionCode, index) {
+function readbackItemRow(page, conditionCode, index) {
   const code = conditionCode.toUpperCase();
 
-  return page.evaluate(({ code, index }) => {
-    function getInputValue(suffix, idx) {
+  /* eslint-disable no-undef -- document exists in browser context (page.evaluate) */
+  return page.evaluate(({ code: c, index: idx }) => {
+    function getInputValue(suffix, i) {
       const inputs = Array.from(document.querySelectorAll('input'))
         .filter((el) => el.id && el.id.endsWith(suffix));
-      const target = inputs[idx];
+      const target = inputs[i];
       return target ? target.value.trim() : null;
     }
 
-    function getSelectValue(suffix, idx) {
+    function getSelectValue(suffix, i) {
       const selects = Array.from(document.querySelectorAll('select'))
         .filter((el) => el.id && el.id.endsWith(suffix));
-      const target = selects[idx];
+      const target = selects[i];
       return target ? target.value.trim() : null;
     }
 
-    function getRadioState(suffixOutright, suffixExchange, idx) {
+    function getRadioState(suffixOutright, suffixExchange, i) {
       const outrightInputs = Array.from(document.querySelectorAll('input'))
         .filter((el) => el.id && el.id.endsWith(suffixOutright));
       const exchangeInputs = Array.from(document.querySelectorAll('input'))
         .filter((el) => el.id && el.id.endsWith(suffixExchange));
-      if (outrightInputs[idx]?.checked) return 'OUTRIGHT';
-      if (exchangeInputs[idx]?.checked) return 'EXCHANGE';
+      if (outrightInputs[i]?.checked) return 'OUTRIGHT';
+      if (exchangeInputs[i]?.checked) return 'EXCHANGE';
       return null;
     }
 
     return {
-      qty: getInputValue(`txt${code}Qty1`, index),
-      traceability: getSelectValue(`ddl${code}Traceability1`, index),
-      uom: getInputValue(`txt${code}UnitMeasure1`, index),
-      price: getInputValue(`txt${code}Price1`, index),
-      price_type: getRadioState(`rbOutright${code}1`, `rbExchange${code}1`, index),
-      lead_time: getInputValue(`txt${code}Lead1`, index),
-      tag_date: getInputValue(`txt${code}Date1`, index),
-      min_qty: getInputValue(`txt${code}MinQuantity1`, index),
-      comments: getInputValue(`txt${code}Comments1`, index),
+      qty: getInputValue(`txt${c}Qty1`, idx),
+      traceability: getSelectValue(`ddl${c}Traceability1`, idx),
+      uom: getInputValue(`txt${c}UnitMeasure1`, idx),
+      price: getInputValue(`txt${c}Price1`, idx),
+      price_type: getRadioState(`rbOutright${c}1`, `rbExchange${c}1`, idx),
+      lead_time: getInputValue(`txt${c}Lead1`, idx),
+      tag_date: getInputValue(`txt${c}Date1`, idx),
+      min_qty: getInputValue(`txt${c}MinQuantity1`, idx),
+      comments: getInputValue(`txt${c}Comments1`, idx),
     };
+    /* eslint-enable no-undef */
   }, { code, index });
 }
 

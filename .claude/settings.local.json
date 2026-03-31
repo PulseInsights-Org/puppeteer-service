@@ -7,7 +7,9 @@
       "Bash(python -m pytest tests/test_puppeteer_payload_variants.py -v)",
       "Bash(pip install:*)",
       "Bash(npx jest:*)",
-      "Bash(python -m pytest tests/test_puppeteer_payload_variants.py -v --tb=short)"
+      "Bash(python -m pytest tests/test_puppeteer_payload_variants.py -v --tb=short)",
+      "Bash(./node_modules/.bin/eslint src/services/form-validator.js)",
+      "Bash(npx eslint@8 src/services/form-validator.js --no-error-on-unmatched-pattern)"
     ]
   }
 }
