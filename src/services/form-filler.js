@@ -228,42 +228,112 @@ async function fillItemRow(page, item, index, requestId) {
   logger.debug(`Completed item row ${index + 1} [${code}]`, { requestId });
 }
 
+/**
+ * Read the part numbers from each row on the ILS form by scraping the
+ * "Requested: <part_number>" header labels. Returns an ordered array of
+ * part numbers matching the form's visual row order.
+ */
+async function readFormRowPartNumbers(page, requestId) {
+  try {
+    /* eslint-disable no-undef -- document exists in browser context (page.evaluate) */
+    /* istanbul ignore next -- browser-context code */
+    const partNumbers = await page.evaluate(() => {
+      const headers = Array.from(document.querySelectorAll('td, th, span, div, b, strong'));
+      const results = [];
+      for (const el of headers) {
+        const text = (el.textContent || '').trim();
+        const match = text.match(/^Requested:\s*(.+)$/i);
+        if (match) {
+          results.push(match[1].trim());
+        }
+      }
+      return results;
+    });
+    /* eslint-enable no-undef */
+
+    logger.info('Form row part numbers detected', { requestId, partNumbers });
+    return partNumbers || [];
+  } catch (error) {
+    logger.warn('Failed to read form row part numbers', { requestId, error: error.message });
+    return [];
+  }
+}
+
 async function fillRfqForm(page, quoteDetails, requestId) {
   const { items, supplier_comments, quote_prepared_by } = quoteDetails;
 
   if (items && items.length > 0) {
-    // Sort items by item_number to match ILS form row order
-    const sortedItems = [...items].sort((a, b) => {
-      const aNum = a.item_number || '';
-      const bNum = b.item_number || '';
-      return aNum.localeCompare(bNum);
-    });
-
-    logger.info(`Filling ${sortedItems.length} item(s)`, { requestId });
+    logger.info(`Filling ${items.length} item(s)`, { requestId });
 
     // Only open "Quote Other Conditions" for products that have non-NE variants
-    await openOtherConditionsForProducts(page, sortedItems, requestId);
+    await openOtherConditionsForProducts(page, items, requestId);
 
-    // Group items by conditionCode to track per-code index
-    const codeIndexMap = {};
+    // Read part numbers from the form DOM to match payload items to correct rows
+    const formPartNumbers = await readFormRowPartNumbers(page, requestId);
 
-    for (let i = 0; i < sortedItems.length; i++) {
-      const item = sortedItems[i];
+    if (formPartNumbers.length > 0) {
+      // Part-number matching: match each payload item to its form row by part_no
+      logger.info('Using part-number matching for form fill', { requestId, formRows: formPartNumbers.length });
 
-      const code = (item.conditionCode || 'NE').toUpperCase();
+      // Build mapping: part_no → form row index (per condition code)
+      // The form rows are in visual order, and each NE row gets a sequential index
+      const codeIndexCounter = {};
+      const partToFormIndex = {};
 
-      if (!codeIndexMap[code]) {
-        codeIndexMap[code] = 0;
+      for (const formPartNo of formPartNumbers) {
+        const code = 'NE'; // default condition code for row counting
+        if (!codeIndexCounter[code]) codeIndexCounter[code] = 0;
+        partToFormIndex[formPartNo] = { code, index: codeIndexCounter[code] };
+        codeIndexCounter[code]++;
       }
 
-      if (item.no_quote) {
-        logger.info(`Skipping item (no_quote: true), advancing form row index`, { requestId, index: i, code, formRowIndex: codeIndexMap[code] });
+      logger.info('Part-to-row mapping built', { requestId, mapping: partToFormIndex });
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const partNo = item.part_no || '';
+
+        if (item.no_quote) {
+          logger.info('Skipping item (no_quote: true)', { requestId, partNo });
+          continue;
+        }
+
+        const formRow = partToFormIndex[partNo];
+
+        if (!formRow) {
+          logger.warn('No matching form row found for part', { requestId, partNo, availableRows: Object.keys(partToFormIndex) });
+          continue;
+        }
+
+        logger.info('Matched part to form row', { requestId, partNo, formIndex: formRow.index });
+        await fillItemRow(page, item, formRow.index, requestId);
+      }
+    } else {
+      // Fallback: sequential index filling (if form row detection fails)
+      logger.warn('Could not detect form row part numbers, falling back to sequential fill', { requestId });
+
+      const sortedItems = [...items].sort((a, b) => {
+        const aNum = a.item_number || '';
+        const bNum = b.item_number || '';
+        return aNum.localeCompare(bNum);
+      });
+
+      const codeIndexMap = {};
+      for (let i = 0; i < sortedItems.length; i++) {
+        const item = sortedItems[i];
+        const code = (item.conditionCode || 'NE').toUpperCase();
+
+        if (!codeIndexMap[code]) codeIndexMap[code] = 0;
+
+        if (item.no_quote) {
+          logger.info('Skipping item (no_quote: true), advancing form row index', { requestId, index: i, code, formRowIndex: codeIndexMap[code] });
+          codeIndexMap[code]++;
+          continue;
+        }
+
+        await fillItemRow(page, item, codeIndexMap[code], requestId);
         codeIndexMap[code]++;
-        continue;
       }
-
-      await fillItemRow(page, item, codeIndexMap[code], requestId);
-      codeIndexMap[code]++;
     }
   }
 
@@ -536,4 +606,5 @@ module.exports = {
   fillRepeaterFieldBySuffix,
   selectDropdownBySuffix,
   clickElementBySuffix,
+  readFormRowPartNumbers,
 };
