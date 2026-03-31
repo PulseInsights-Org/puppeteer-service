@@ -59,6 +59,12 @@ jest.mock('../../../src/services/screenshot', () => ({
   isConfigured: () => mockIsConfigured()
 }));
 
+const mockValidateAndCorrect = jest.fn();
+
+jest.mock('../../../src/services/form-validator', () => ({
+  validateAndCorrect: (...args) => mockValidateAndCorrect(...args),
+}));
+
 jest.mock('../../../src/services/idempotency', () => ({
   generateIdempotencyKey: (...args) => mockGenerateIdempotencyKey(...args),
   checkIdempotency: (...args) => mockCheckIdempotency(...args),
@@ -120,6 +126,15 @@ describe('Fill RFQ Route', () => {
       type: 'filled',
       captured_at: new Date().toISOString(),
       storage_path: 'screenshots/test.png'
+    });
+    mockValidateAndCorrect.mockResolvedValue({
+      status: 'pass',
+      source: 'payload',
+      items_validated: 1,
+      fields_checked: 9,
+      mismatches_found: [],
+      correction_attempts: 0,
+      duration_ms: 50,
     });
   });
 
@@ -284,8 +299,10 @@ describe('Fill RFQ Route', () => {
         .send(validPayload)
         .expect(200);
 
-      expect(response.body.screenshot_data).toHaveLength(1);
+      expect(response.body.screenshot_data.length).toBeGreaterThanOrEqual(1);
       expect(response.body.screenshot_data[0].form_url).toBe('https://example.com/rfq-form');
+      expect(response.body.validation).toBeDefined();
+      expect(response.body.validation.status).toBe('pass');
     });
   });
 

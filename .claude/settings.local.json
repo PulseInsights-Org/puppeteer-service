@@ -5,7 +5,14 @@
       "Bash(npx cross-env:*)",
       "Bash(./venv/Scripts/python -m pytest tests/test_puppeteer_payload_variants.py -v)",
       "Bash(python -m pytest tests/test_puppeteer_payload_variants.py -v)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(npx jest:*)",
+      "Bash(python -m pytest tests/test_puppeteer_payload_variants.py -v --tb=short)",
+      "Bash(./node_modules/.bin/eslint src/services/form-validator.js)",
+      "Bash(npx eslint@8 src/services/form-validator.js --no-error-on-unmatched-pattern)",
+      "Bash(node node_modules/.bin/jest tests/unit/services/form-validator.test.js --verbose --coverage --collectCoverageFrom='src/services/form-validator.js')",
+      "Bash(node node_modules/jest/bin/jest.js tests/unit/services/form-validator.test.js --verbose --coverage --collectCoverageFrom='src/services/form-validator.js')",
+      "Bash(npx.cmd jest:*)"
     ]
   }
 }

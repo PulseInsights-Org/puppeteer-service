@@ -12,13 +12,13 @@ SUMMARY FOR MANAGER
 
 RFQ Bug — Root Cause Found & Fixed (ILSCS8W260320073215)
 
-What happened: The form-fill automation submitted wrong prices to the ILS portal. Part 14330-232-201 ($719) got listed as $29, part 14320-220 (should be No Quote) got listed as $719, and part 15800-229-1 ($29) was shown as No Quote. The email sent to the buyer was correct — only the ILS form submission had wrong data.
+What happened: The form-fill automation submitted wrong prices to the ILS portal. Part 14330-232-201 ($719) got listed as $29, part 14320-220 (should be No Quote) got listed as $719, and part 15800-229-1 ($29) was shown as No Quote. The email sent to the buyer was correct, only the ILS form submission had wrong data.
 
 Why it happened: Two issues working together:
 
-1. Our system sends the parts list in a different sequence than how ILS displays them on their form. The form fills top-to-bottom by position, so Part A's data ended up in Part B's row.
+1. Our ingestion-service sends the parts list in a different sequence than how ILS displays them on their form. The form fills top-to-bottom by position, so Part A's data ended up in Part B's row.
 
-2. When a part has zero stock (like 14320-220), our system was completely removing it from the list before filling the form. But the ILS form still has a row for that part. With the zero-stock part removed from our list, we only had 2 items to fill into a 3-row form — so everything shifted into the wrong position.
+2. When a part has zero stock (like 14320-220), our code was completely removing it from the list before filling the form. But the ILS form still has a row for that part. With the zero-stock part removed from our list, we only had 2 items to fill into a 3-row form, so everything shifted into the wrong position.
 
 The fix (implemented across both services):
 - Items are now sorted by their ILS item number before filling, so our order always matches the form
@@ -31,10 +31,10 @@ Impact: This affects any RFQ where one or more parts in the middle of the list a
 SUMMARY FOR CLIENT
 ------------------------------------
 
+
+
+Hi Mahesh,
 Update on the incorrect quote issue (RFQ ILSCS8W260320073215)
-
-Hi team,
-
 I investigated the ILS form submission issue that showed incorrect prices for the 3 parts in this RFQ. Here is what i had found.
 
 What went wrong:

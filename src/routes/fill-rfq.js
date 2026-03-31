@@ -13,6 +13,7 @@ const { rateLimit } = require('../middleware/rate-limiter');
 const { launchBrowser, setupPage, closeBrowser, getShuttingDown } = require('../services/browser');
 const { fillRfqForm, cancelFormSubmission, submitForm, delay } = require('../services/form-filler');
 const { captureAndUploadScreenshot, isConfigured: isSupabaseConfigured } = require('../services/screenshot');
+const { validateAndCorrect } = require('../services/form-validator');
 const {
   generateIdempotencyKey,
   checkIdempotency,
@@ -316,16 +317,52 @@ router.post('/', async (req, res) => {
     logger.info('Starting form fill', { requestId });
     await fillRfqForm(page, quote_details, requestId);
 
-    // Capture and upload screenshot directly to Supabase
-    logger.info('Capturing and uploading screenshot to Supabase', { requestId, rfqId });
-    const screenshotResult = await captureAndUploadScreenshot(page, rfqId, 'filled', requestId);
-    screenshotResult.form_url = url;
+    // Capture pre-validation screenshot
+    logger.info('Capturing pre-validation screenshot', { requestId, rfqId });
+    const preValidationScreenshot = await captureAndUploadScreenshot(page, rfqId, 'pre-validation', requestId);
+    preValidationScreenshot.form_url = url;
 
-    logger.info('Screenshot upload complete', { requestId, url: screenshotResult.url });
+    // Validate filled fields and auto-correct mismatches
+    logger.info('Starting form validation', { requestId, rfqId });
+    const validationReport = await validateAndCorrect(page, quote_details, requestId);
 
-    // Conditional form action based on isTestMode flag from RFQ Ingest Service
-    // isTestMode = true  → Cancel form (test mode, no downstream side effects)
-    // isTestMode = false → Submit form (production mode)
+    // Capture post-correction screenshot if corrections were made
+    let postCorrectionScreenshot = null;
+    if (validationReport.correction_attempts > 0) {
+      logger.info('Capturing post-correction screenshot', { requestId, rfqId });
+      postCorrectionScreenshot = await captureAndUploadScreenshot(page, rfqId, 'post-correction', requestId);
+      postCorrectionScreenshot.form_url = url;
+    }
+
+    logger.info('Form validation complete', {
+      requestId, rfqId,
+      status: validationReport.status,
+      source: validationReport.source,
+      mismatches: validationReport.mismatches_found.length,
+      corrections: validationReport.correction_attempts,
+      duration_ms: validationReport.duration_ms,
+    });
+
+    // Block submission if validation failed in production mode
+    if (validationReport.status === 'fail' && !isTestMode) {
+      logger.error('Form validation FAILED - blocking submission', { requestId, rfqId });
+      markFailed(idempotencyKey, 'Form validation failed after correction attempts');
+
+      return res.status(500).json({
+        success: false,
+        error: 'Form validation failed - data mismatch could not be corrected',
+        requestId,
+        validation: validationReport,
+        screenshot_data: [preValidationScreenshot, postCorrectionScreenshot].filter(Boolean),
+      });
+    }
+
+    // Capture final screenshot
+    logger.info('Capturing final screenshot', { requestId, rfqId });
+    const finalScreenshot = await captureAndUploadScreenshot(page, rfqId, 'filled', requestId);
+    finalScreenshot.form_url = url;
+
+    // Conditional form action based on isTestMode flag
     let finalAction;
     let submitSuccess = true;
 
@@ -339,9 +376,11 @@ router.post('/', async (req, res) => {
       logger.info(`Final action: ${finalAction} (production mode)`, { requestId, rfqId, submitSuccess });
     }
 
+    // Collect all screenshots
+    const allScreenshots = [preValidationScreenshot, postCorrectionScreenshot, finalScreenshot].filter(Boolean);
+
     // If production mode submission failed, return error
     if (!isTestMode && !submitSuccess) {
-      // Mark as failed in idempotency store (allows retry)
       markFailed(idempotencyKey, 'Form submission failed - submit button not found or submission error');
 
       return res.status(500).json({
@@ -349,7 +388,8 @@ router.post('/', async (req, res) => {
         error: 'Form submission failed - submit button not found or submission error',
         requestId,
         finalAction,
-        screenshot_data: [screenshotResult]
+        validation: validationReport,
+        screenshot_data: allScreenshots,
       });
     }
 
@@ -360,7 +400,8 @@ router.post('/', async (req, res) => {
       requestId,
       finalAction,
       isTestMode,
-      screenshot_data: [screenshotResult]
+      validation: validationReport,
+      screenshot_data: allScreenshots,
     };
 
     // Mark as completed in idempotency store

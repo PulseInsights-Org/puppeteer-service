@@ -41,6 +41,18 @@ jest.mock('../../src/services/form-filler', () => ({
   delay: jest.fn().mockResolvedValue(undefined)
 }));
 
+jest.mock('../../src/services/form-validator', () => ({
+  validateAndCorrect: jest.fn().mockResolvedValue({
+    status: 'pass',
+    source: 'payload',
+    items_validated: 1,
+    fields_checked: 9,
+    mismatches_found: [],
+    correction_attempts: 0,
+    duration_ms: 50,
+  }),
+}));
+
 // Create app after mocks are set up
 function createApp() {
   const app = express();
