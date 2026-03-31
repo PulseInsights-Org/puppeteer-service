@@ -461,9 +461,9 @@ describe('Form Filler Service', () => {
     it('should call page.select when dropdown has actualId', async () => {
       // Make waitForFunction resolve (element found)
       mockPage.waitForFunction.mockResolvedValue(undefined);
-      // All items are NE so openOtherConditionsForProducts is skipped.
-      // evaluate calls: fillRepeaterFieldBySuffix for qty, selectDropdownBySuffix actualId, etc.
+      // evaluate calls: readFormRowPartNumbers (returns [] → fallback), then form filling
       mockPage.evaluate
+        .mockResolvedValueOnce(undefined)  // readFormRowPartNumbers (returns undefined → [])
         .mockResolvedValueOnce(undefined)  // fillRepeaterFieldBySuffix for qty
         .mockResolvedValueOnce('ctl00_ddlNETraceability1')  // selectDropdownBySuffix - get actualId
         .mockResolvedValueOnce(undefined);  // next field
@@ -1175,6 +1175,107 @@ describe('Form Filler Service', () => {
     });
   });
 
+  describe('readFormRowPartNumbers', () => {
+    it('should return empty array when page.evaluate returns undefined', async () => {
+      jest.useRealTimers();
+      mockPage.evaluate.mockResolvedValueOnce(undefined);
+      const result = await formFiller.readFormRowPartNumbers(mockPage, 'test-request-id');
+      expect(result).toEqual([]);
+    });
+
+    it('should return part numbers from page.evaluate', async () => {
+      jest.useRealTimers();
+      mockPage.evaluate.mockResolvedValueOnce(['2D2019-5', 'SAM 222-19', 'SAM222-19']);
+      const result = await formFiller.readFormRowPartNumbers(mockPage, 'test-request-id');
+      expect(result).toEqual(['2D2019-5', 'SAM 222-19', 'SAM222-19']);
+    });
+
+    it('should return empty array when page.evaluate throws', async () => {
+      jest.useRealTimers();
+      mockPage.evaluate.mockRejectedValueOnce(new Error('DOM error'));
+      const result = await formFiller.readFormRowPartNumbers(mockPage, 'test-request-id');
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('part-number matching in fillRfqForm', () => {
+    beforeEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('should match payload items to correct form rows by part number', async () => {
+      // readFormRowPartNumbers returns form row order
+      mockPage.evaluate
+        .mockResolvedValueOnce(['2D2019-5', 'SAM 222-19', 'SAM222-19'])  // readFormRowPartNumbers
+        .mockResolvedValue(undefined);  // all subsequent fill calls
+
+      const quoteDetails = {
+        items: [
+          { part_no: 'SAM222-19', qty_available: '2', price_usd: '880' },
+          { part_no: '2D2019-5', qty_available: '1', price_usd: '555.64' },
+          { part_no: 'SAM 222-19', qty_available: '2', price_usd: '1376' },
+        ]
+      };
+
+      await formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id');
+
+      // Verify fillItemRow was called (waitForFunction is called per field)
+      expect(mockPage.waitForFunction).toHaveBeenCalled();
+      expect(mockPage.evaluate).toHaveBeenCalled();
+    });
+
+    it('should skip no_quote items in part-number matching mode', async () => {
+      mockPage.evaluate
+        .mockResolvedValueOnce(['PART-A', 'PART-B'])  // readFormRowPartNumbers
+        .mockResolvedValue(undefined);
+
+      const quoteDetails = {
+        items: [
+          { part_no: 'PART-A', qty_available: '1', no_quote: true },
+          { part_no: 'PART-B', qty_available: '5', price_usd: '100' },
+        ]
+      };
+
+      await formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id');
+
+      // Only PART-B should be filled (waitForFunction called for its fields)
+      expect(mockPage.waitForFunction).toHaveBeenCalled();
+    });
+
+    it('should skip items with no matching form row', async () => {
+      mockPage.evaluate
+        .mockResolvedValueOnce(['PART-A'])  // readFormRowPartNumbers: only PART-A on form
+        .mockResolvedValue(undefined);
+
+      const quoteDetails = {
+        items: [
+          { part_no: 'PART-A', qty_available: '1', price_usd: '50' },
+          { part_no: 'PART-X', qty_available: '1', price_usd: '99' },  // not on form
+        ]
+      };
+
+      await formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id');
+
+      // Should still succeed without error (PART-X silently skipped)
+      expect(mockPage.waitForFunction).toHaveBeenCalled();
+    });
+
+    it('should fall back to sequential fill when form row detection returns empty', async () => {
+      mockPage.evaluate
+        .mockResolvedValueOnce([])  // readFormRowPartNumbers: empty
+        .mockResolvedValue(undefined);
+
+      const quoteDetails = {
+        items: [{ part_no: 'TEST-001', qty_available: '100', price_usd: '25.00' }]
+      };
+
+      await formFiller.fillRfqForm(mockPage, quoteDetails, 'test-request-id');
+
+      // Should still fill (fallback sequential mode)
+      expect(mockPage.waitForFunction).toHaveBeenCalled();
+    });
+  });
+
   describe('module exports', () => {
     it('should export fillRfqForm function', () => {
       expect(typeof formFiller.fillRfqForm).toBe('function');
@@ -1190,6 +1291,10 @@ describe('Form Filler Service', () => {
 
     it('should export submitForm function', () => {
       expect(typeof formFiller.submitForm).toBe('function');
+    });
+
+    it('should export readFormRowPartNumbers function', () => {
+      expect(typeof formFiller.readFormRowPartNumbers).toBe('function');
     });
   });
 });
