@@ -42,30 +42,38 @@ async function fetchValidatedQuoteData(items, requestId) {
     partCount: partNumbers.length,
   });
 
-  const response = await fetch(VALIDATE_QUOTE_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      part_numbers: partNumbers,
-      requested_quantities: requestedQuantities,
-      tag_date: tagDate,
-    }),
-  });
+  try {
+    const response = await fetch(VALIDATE_QUOTE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        part_numbers: partNumbers,
+        requested_quantities: requestedQuantities,
+        tag_date: tagDate,
+      }),
+    });
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    logger.error('validate-quote endpoint failed', { requestId, status: response.status, body });
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      logger.warn('validate-quote endpoint returned error', { requestId, status: response.status, body });
+      return null;
+    }
+
+    const data = await response.json();
+    logger.info('validate-quote response received', {
+      requestId,
+      itemCount: data.items?.length || 0,
+      errors: data.errors?.length || 0,
+    });
+
+    return data;
+  } catch (error) {
+    logger.warn('validate-quote endpoint unreachable, falling back to payload', {
+      requestId,
+      error: error.message,
+    });
     return null;
   }
-
-  const data = await response.json();
-  logger.info('validate-quote response received', {
-    requestId,
-    itemCount: data.items?.length || 0,
-    errors: data.errors?.length || 0,
-  });
-
-  return data;
 }
 
 // =============================================================================
@@ -80,6 +88,7 @@ function readbackItemRow(page, conditionCode, index) {
   const code = conditionCode.toUpperCase();
 
   /* eslint-disable no-undef -- document exists in browser context (page.evaluate) */
+  /* istanbul ignore next -- browser-context code, not instrumentable by Node.js coverage */
   return page.evaluate(({ code: c, index: idx }) => {
     function getInputValue(suffix, i) {
       const inputs = Array.from(document.querySelectorAll('input'))
