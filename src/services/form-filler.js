@@ -532,5 +532,8 @@ module.exports = {
   fillRfqForm,
   cancelFormSubmission,
   submitForm,
-  delay
+  delay,
+  fillRepeaterFieldBySuffix,
+  selectDropdownBySuffix,
+  clickElementBySuffix,
 };

@@ -5,7 +5,9 @@
       "Bash(npx cross-env:*)",
       "Bash(./venv/Scripts/python -m pytest tests/test_puppeteer_payload_variants.py -v)",
       "Bash(python -m pytest tests/test_puppeteer_payload_variants.py -v)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(npx jest:*)",
+      "Bash(python -m pytest tests/test_puppeteer_payload_variants.py -v --tb=short)"
     ]
   }
 }

@@ -1,0 +1,72 @@
+Form Fill Validation : Design Plan
+====================================
+
+Problem:
+The form fill automation sometimes submits incorrect data to ILS. Wrong prices, missing quantities, data in wrong rows. The email response is always correct, but the form fill can go wrong silently. We only find out when the customer complains.
+
+The root issue: our system fills the form and submits it blindly. There is no check between filling and submitting.
+
+
+What we are building:
+A validation layer that sits between "form filled" and "submit button clicked." It reads back what was actually filled into the form, verifies it against a freshly computed source of truth from the ingest service, and auto corrects any mismatches before submitting.
+
+
+How it works, step by step:
+
+1. Form gets filled
+
+2. Source of truth verification via ingest service callback
+   The puppeteer service sends the list of part numbers to a new lightweight endpoint on the ingest service. This endpoint does the following internally:
+
+   a) Takes the list of part numbers from the request
+   b) Makes a live Shopify API lookup for each part number to get current prices, inventory, traceability certs, and unit of measure
+   c) Transforms the raw Shopify response into a normalized flat format (same transformation logic already used during normal RFQ processing)
+   d) Applies quantity logic per variant: if available qty is greater than or equal to requested, fill requested qty with lead time "Stock". If available is less than requested, fill available qty with a partial stock comment. If inventory is zero, mark as no quote unless the vendor is on the allowed list
+   e) Applies traceability mapping: converts Shopify cert values (like "FAA 8130-3") to ILS dropdown values (like "8130")
+   f) Applies vendor allowed rules: for specific manufacturers with zero inventory, still quotes with estimated lead time instead of marking as no quote
+   g) Builds the exact same item structure the puppeteer service expects
+
+3. DOM readback
+   After filling the form, we read back every field value directly from the browser. Prices, quantities, UOM, lead times, traceability, all of it. This tells us exactly what the form currently contains.
+
+4. Compare and correct
+   We compare what is in the form against the freshly computed data. If everything matches, we proceed. If any field is wrong, the system re fills only the incorrect fields automatically. It then reads back again to confirm the fix took. This retry happens up to 2 times. If it still cannot get it right, we stop and do NOT submit. The RFQ gets flagged for manual review instead.
+
+5. Screenshot + Submit
+
+
+Infrastructure impact:
+
+No new servers or services
+No new databases
+No new npm or Python packages
+One new lightweight validation endpoint on the ingest service (reuses all existing functions)
+One additional HTTP call per RFQ from puppeteer to ingest service (1 to 2 seconds)
+One additional Shopify API call per RFQ during validation (batched, handled by the ingest service)
+Total added time per RFQ: approximately 2 to 3 seconds
+Runs on the existing T2 nano without any issues
+
+
+---
+Client Summary
+
+
+Update: Intelligent Form Validation Layer
+
+We have introduced an AI powered validation layer into our RFQ form filling workflow. This layer sits between the form being filled and the submit button being clicked, acting as an intelligent quality gate that catches and corrects errors before they reach the customer.
+
+How it works:
+
+1. The form gets filled with quote data as before.
+
+2. Our AI agent then performs a real time verification. It cross references every filled field against a freshly computed source of truth by making a live Shopify lookup, applying all business rules (pricing, inventory, quantity logic, traceability mapping, vendor specific rules), and generating what the correct form data should be at that exact moment.
+
+3. The agent reads back every single value from the filled form and intelligently compares it against the verified source of truth. Prices, quantities, unit of measure, lead times, traceability, tag dates, everything is checked field by field.
+
+4. If the agent detects any discrepancy, it automatically corrects only the mismatched fields, re reads them to confirm the correction took effect, and retries up to two times. If it still cannot resolve the issue, it blocks the submission entirely and flags the RFQ for manual review. No incorrect data reaches the customer.
+
+5. Multiple screenshots are captured at each stage (before validation, after correction if needed, and final state) providing a complete audit trail for every RFQ.
+
+6. A detailed validation report is generated and stored for each RFQ, showing what was checked, what was found, and what was corrected. This is visible on the dashboard for full transparency.
+
+This validation layer adds approximately 2 to 3 seconds per RFQ and runs entirely within our existing infrastructure with no additional servers or services required.
