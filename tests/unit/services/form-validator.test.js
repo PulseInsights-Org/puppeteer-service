@@ -6,6 +6,7 @@ jest.mock('../../../src/services/form-filler', () => ({
   fillRepeaterFieldBySuffix: jest.fn().mockResolvedValue(undefined),
   selectDropdownBySuffix: jest.fn().mockResolvedValue(undefined),
   clickElementBySuffix: jest.fn().mockResolvedValue(undefined),
+  readFormRowPartNumbers: jest.fn().mockResolvedValue([]),
   fillRfqForm: jest.fn(),
   cancelFormSubmission: jest.fn(),
   submitForm: jest.fn(),
