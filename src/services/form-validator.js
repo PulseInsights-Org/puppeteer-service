@@ -300,8 +300,8 @@ async function validateAndCorrect(page, quoteDetails, requestId, maxAttempts = 2
       if (!codeIndexCounter[code]) codeIndexCounter[code] = 0;
       if (!partToFormIndex[formPartNo]) {
         partToFormIndex[formPartNo] = { code, index: codeIndexCounter[code] };
+        codeIndexCounter[code]++;
       }
-      codeIndexCounter[code]++;
     }
   }
 

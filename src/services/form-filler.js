@@ -283,13 +283,14 @@ async function fillRfqForm(page, quoteDetails, requestId) {
       for (const formPartNo of formPartNumbers) {
         const code = 'NE'; // default condition code for row counting
         if (!codeIndexCounter[code]) codeIndexCounter[code] = 0;
-        // Keep the FIRST occurrence only — the editable input row (index 0)
+        // Keep the FIRST occurrence only — the editable input row
         // ILS forms show each part twice (TH header + SPAN child), but
-        // editable fields only exist at the first index
+        // editable fields only exist once per unique part number.
+        // Only increment counter for unique parts so indices stay sequential.
         if (!partToFormIndex[formPartNo]) {
           partToFormIndex[formPartNo] = { code, index: codeIndexCounter[code] };
+          codeIndexCounter[code]++;
         }
-        codeIndexCounter[code]++;
       }
 
       logger.info('Part-to-row mapping built', { requestId, mapping: partToFormIndex });
