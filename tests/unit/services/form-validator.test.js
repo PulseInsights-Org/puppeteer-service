@@ -6,6 +6,7 @@ jest.mock('../../../src/services/form-filler', () => ({
   fillRepeaterFieldBySuffix: jest.fn().mockResolvedValue(undefined),
   selectDropdownBySuffix: jest.fn().mockResolvedValue(undefined),
   clickElementBySuffix: jest.fn().mockResolvedValue(undefined),
+  readFormRowPartNumbers: jest.fn().mockResolvedValue([]),
   fillRfqForm: jest.fn(),
   cancelFormSubmission: jest.fn(),
   submitForm: jest.fn(),
@@ -40,6 +41,7 @@ const {
   fillRepeaterFieldBySuffix,
   selectDropdownBySuffix,
   clickElementBySuffix,
+  readFormRowPartNumbers,
 } = require('../../../src/services/form-filler');
 
 const logger = require('../../../src/utils/logger');
@@ -1428,6 +1430,155 @@ describe('Form Validator Service', () => {
         'Falling back to payload as validation source',
         expect.objectContaining({ requestId: 'req-1' })
       );
+    });
+
+    // =========================================================================
+    // Part-number matching path in validateAndCorrect
+    // =========================================================================
+
+    describe('part-number matching validation path', () => {
+      beforeEach(() => {
+        global.fetch.mockRejectedValue(new Error('not available'));
+      });
+
+      it('should use part-number matching when readFormRowPartNumbers returns part numbers', async () => {
+        const item = makeItem({ part_no: 'PART-A' });
+        readFormRowPartNumbers.mockResolvedValue(['PART-A']);
+        mockPage.evaluate.mockResolvedValue(makeMatchingActual());
+
+        const report = await validateAndCorrect(mockPage, { items: [item] }, 'req-1');
+
+        expect(report.status).toBe('pass');
+        expect(report.items_validated).toBe(1);
+        expect(report.fields_checked).toBe(9);
+        expect(readFormRowPartNumbers).toHaveBeenCalledWith(mockPage, 'req-1');
+      });
+
+      it('should match multiple items to correct form rows by part number', async () => {
+        const items = [
+          makeItem({ part_no: 'PART-A', price_usd: '100' }),
+          makeItem({ part_no: 'PART-B', price_usd: '100', item_number: '2' }),
+        ];
+        readFormRowPartNumbers.mockResolvedValue(['PART-A', 'PART-B']);
+        mockPage.evaluate.mockResolvedValue(makeMatchingActual());
+
+        const report = await validateAndCorrect(mockPage, { items }, 'req-1');
+
+        expect(report.status).toBe('pass');
+        expect(report.items_validated).toBe(2);
+        expect(report.fields_checked).toBe(18);
+      });
+
+      it('should skip items with no matching form row in part-number matching', async () => {
+        const items = [
+          makeItem({ part_no: 'PART-A' }),
+          makeItem({ part_no: 'PART-MISSING', item_number: '2' }),
+        ];
+        readFormRowPartNumbers.mockResolvedValue(['PART-A']);
+        mockPage.evaluate.mockResolvedValue(makeMatchingActual());
+
+        const report = await validateAndCorrect(mockPage, { items }, 'req-1');
+
+        expect(report.status).toBe('pass');
+        expect(logger.warn).toHaveBeenCalledWith(
+          'Validator: no form row for part',
+          expect.objectContaining({ partNo: 'PART-MISSING' })
+        );
+      });
+
+      it('should detect mismatches and correct using part-number matching', async () => {
+        const item = makeItem({ part_no: 'PART-A' });
+        readFormRowPartNumbers.mockResolvedValue(['PART-A']);
+
+        // First readback: mismatch on qty
+        mockPage.evaluate
+          .mockResolvedValueOnce({ ...makeMatchingActual(), qty: '99' })
+          // Second readback after correction: match
+          .mockResolvedValueOnce(makeMatchingActual());
+
+        const report = await validateAndCorrect(mockPage, { items: [item] }, 'req-1');
+
+        expect(report.status).toBe('pass');
+        expect(report.correction_attempts).toBe(1);
+        expect(report.mismatches_found.length).toBe(1);
+        expect(report.mismatches_found[0].part_no).toBe('PART-A');
+        expect(report.mismatches_found[0].corrected).toBe(true);
+        expect(fillRepeaterFieldBySuffix).toHaveBeenCalledWith(
+          mockPage, 'txtNEQty1', 0, '10'
+        );
+      });
+
+      it('should fail after max attempts in part-number matching mode', async () => {
+        const item = makeItem({ part_no: 'PART-A' });
+        readFormRowPartNumbers.mockResolvedValue(['PART-A']);
+
+        // Always return mismatch
+        mockPage.evaluate.mockResolvedValue({ ...makeMatchingActual(), qty: '99' });
+
+        const report = await validateAndCorrect(mockPage, { items: [item] }, 'req-1', 2);
+
+        expect(report.status).toBe('fail');
+        expect(report.correction_attempts).toBe(2);
+      });
+
+      it('should skip correction for items with no form row during correction phase', async () => {
+        const items = [
+          makeItem({ part_no: 'PART-A' }),
+          makeItem({ part_no: 'PART-MISSING', item_number: '2' }),
+        ];
+        readFormRowPartNumbers.mockResolvedValue(['PART-A']);
+
+        // Mismatch for PART-A
+        mockPage.evaluate
+          .mockResolvedValueOnce({ ...makeMatchingActual(), qty: '99' })
+          .mockResolvedValueOnce(makeMatchingActual());
+
+        const report = await validateAndCorrect(mockPage, { items }, 'req-1');
+
+        expect(report.status).toBe('pass');
+        expect(report.correction_attempts).toBe(1);
+      });
+
+      it('should handle item with empty part_no in part-number matching', async () => {
+        const item = makeItem({ part_no: '' });
+        readFormRowPartNumbers.mockResolvedValue(['PART-A']);
+        mockPage.evaluate.mockResolvedValue(makeMatchingActual());
+
+        const report = await validateAndCorrect(mockPage, { items: [item] }, 'req-1');
+
+        // Item has empty part_no so no form row match
+        expect(logger.warn).toHaveBeenCalledWith(
+          'Validator: no form row for part',
+          expect.objectContaining({ partNo: '' })
+        );
+      });
+
+      it('should filter out no_quote items from quotable items in part-number matching', async () => {
+        const items = [
+          makeItem({ part_no: 'PART-A', no_quote: true }),
+          makeItem({ part_no: 'PART-B', item_number: '2' }),
+        ];
+        readFormRowPartNumbers.mockResolvedValue(['PART-A', 'PART-B']);
+        mockPage.evaluate.mockResolvedValue(makeMatchingActual());
+
+        const report = await validateAndCorrect(mockPage, { items }, 'req-1');
+
+        expect(report.status).toBe('pass');
+        // Only PART-B should be validated (PART-A is no_quote)
+        expect(report.items_validated).toBe(1);
+      });
+
+      it('should handle duplicate part numbers in form rows (only first mapping used)', async () => {
+        const item = makeItem({ part_no: 'PART-A' });
+        readFormRowPartNumbers.mockResolvedValue(['PART-A', 'PART-A']);
+        mockPage.evaluate.mockResolvedValue(makeMatchingActual());
+
+        const report = await validateAndCorrect(mockPage, { items: [item] }, 'req-1');
+
+        expect(report.status).toBe('pass');
+        // Should use index 0 (first occurrence)
+        expect(report.items_validated).toBe(1);
+      });
     });
   });
 });

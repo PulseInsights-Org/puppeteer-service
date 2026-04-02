@@ -10,7 +10,8 @@ const { formatTagDate } = require('../utils/validation');
 const {
   fillRepeaterFieldBySuffix,
   selectDropdownBySuffix,
-  clickElementBySuffix
+  clickElementBySuffix,
+  readFormRowPartNumbers,
 } = require('./form-filler');
 
 const VALIDATE_QUOTE_URL = process.env.VALIDATE_QUOTE_URL || 'http://localhost:8000/api/v1/validate-quote';
@@ -288,49 +289,102 @@ async function validateAndCorrect(page, quoteDetails, requestId, maxAttempts = 2
     logger.warn('Falling back to payload as validation source', { requestId });
   }
 
-  // Step 2: Sort and build index map (same logic as fillRfqForm)
-  const sortedItems = [...validationSource].sort((a, b) => {
-    const aNum = a.item_number || '';
-    const bNum = b.item_number || '';
-    return aNum.localeCompare(bNum);
-  });
+  // Step 2: Build index map using same part-number matching as fillRfqForm
+  const formPartNumbers = await readFormRowPartNumbers(page, requestId);
+  const partToFormIndex = {};
+
+  if (formPartNumbers.length > 0) {
+    const codeIndexCounter = {};
+    for (const formPartNo of formPartNumbers) {
+      const code = 'NE';
+      if (!codeIndexCounter[code]) codeIndexCounter[code] = 0;
+      if (!partToFormIndex[formPartNo]) {
+        partToFormIndex[formPartNo] = { code, index: codeIndexCounter[code] };
+      }
+      codeIndexCounter[code]++;
+    }
+  }
+
+  const usePartMatching = formPartNumbers.length > 0;
+  // Filter to quotable items only
+  const quotableItems = validationSource.filter((item) => !item.no_quote);
 
   // Step 3: Readback, compare, correct loop
   for (let attempt = 0; attempt <= maxAttempts; attempt++) {
     const currentMismatches = [];
-    const codeIndexMap = {};
 
-    for (let i = 0; i < sortedItems.length; i++) {
-      const item = sortedItems[i];
-      const code = (item.conditionCode || 'NE').toUpperCase();
-      if (!codeIndexMap[code]) codeIndexMap[code] = 0;
+    if (usePartMatching) {
+      // Part-number matching: same strategy as fillRfqForm
+      for (let i = 0; i < quotableItems.length; i++) {
+        const item = quotableItems[i];
+        const partNo = item.part_no || '';
+        const formRow = partToFormIndex[partNo];
 
-      if (item.no_quote) {
-        codeIndexMap[code]++;
-        continue;
-      }
+        if (!formRow) {
+          logger.warn('Validator: no form row for part', { requestId, partNo });
+          continue;
+        }
 
-      const formIndex = codeIndexMap[code];
-      const actualValues = await readbackItemRow(page, code, formIndex);
-      const itemMismatches = compareFields(item, actualValues);
+        const actualValues = await readbackItemRow(page, formRow.code, formRow.index);
+        const itemMismatches = compareFields(item, actualValues);
 
-      report.items_validated = Math.max(report.items_validated, i + 1);
-      report.fields_checked += 9;
+        report.items_validated = Math.max(report.items_validated, i + 1);
+        report.fields_checked += 9;
 
-      if (itemMismatches.length > 0) {
-        for (const m of itemMismatches) {
-          currentMismatches.push({
-            item_index: i,
-            part_no: item.part_no || 'unknown',
-            field: m.field,
-            expected: m.expected,
-            actual: m.actual,
-            corrected: false,
-          });
+        if (itemMismatches.length > 0) {
+          for (const m of itemMismatches) {
+            currentMismatches.push({
+              item_index: i,
+              part_no: partNo,
+              field: m.field,
+              expected: m.expected,
+              actual: m.actual,
+              corrected: false,
+            });
+          }
         }
       }
+    } else {
+      // Fallback: sequential index (when DOM part detection fails)
+      const sortedItems = [...validationSource].sort((a, b) => {
+        const aNum = a.item_number || '';
+        const bNum = b.item_number || '';
+        return aNum.localeCompare(bNum);
+      });
+      const codeIndexMap = {};
 
-      codeIndexMap[code]++;
+      for (let i = 0; i < sortedItems.length; i++) {
+        const item = sortedItems[i];
+        const code = (item.conditionCode || 'NE').toUpperCase();
+        if (!codeIndexMap[code]) codeIndexMap[code] = 0;
+
+        if (item.no_quote) {
+          codeIndexMap[code]++;
+          continue;
+        }
+
+        const formIndex = codeIndexMap[code];
+        const actualValues = await readbackItemRow(page, code, formIndex);
+        const itemMismatches = compareFields(item, actualValues);
+
+        report.items_validated = Math.max(report.items_validated, i + 1);
+        report.fields_checked += 9;
+
+        if (itemMismatches.length > 0) {
+          for (const m of itemMismatches) {
+            currentMismatches.push({
+              item_index: i,
+              part_no: item.part_no || 'unknown',
+              field: m.field,
+              expected: m.expected,
+              actual: m.actual,
+              corrected: false,
+            });
+          }
+        }
+
+        codeIndexMap[code]++;
+      }
     }
 
     // Record mismatches from first pass
@@ -372,24 +426,45 @@ async function validateAndCorrect(page, quoteDetails, requestId, maxAttempts = 2
     report.correction_attempts++;
     logger.info(`Correction attempt ${report.correction_attempts}`, { requestId });
 
-    const codeIndexMapCorrect = {};
-    for (let i = 0; i < sortedItems.length; i++) {
-      const item = sortedItems[i];
-      const code = (item.conditionCode || 'NE').toUpperCase();
-      if (!codeIndexMapCorrect[code]) codeIndexMapCorrect[code] = 0;
+    if (usePartMatching) {
+      // Part-number matching correction
+      for (let i = 0; i < quotableItems.length; i++) {
+        const item = quotableItems[i];
+        const partNo = item.part_no || '';
+        const formRow = partToFormIndex[partNo];
+        if (!formRow) continue;
 
-      if (item.no_quote) {
+        const itemMismatches = currentMismatches.filter((m) => m.item_index === i);
+        if (itemMismatches.length > 0) {
+          await correctMismatchedFields(page, item, formRow.index, itemMismatches, requestId);
+        }
+      }
+    } else {
+      // Fallback: sequential correction
+      const sortedForCorrection = [...validationSource].sort((a, b) => {
+        const aNum = a.item_number || '';
+        const bNum = b.item_number || '';
+        return aNum.localeCompare(bNum);
+      });
+      const codeIndexMapCorrect = {};
+      for (let i = 0; i < sortedForCorrection.length; i++) {
+        const item = sortedForCorrection[i];
+        const code = (item.conditionCode || 'NE').toUpperCase();
+        if (!codeIndexMapCorrect[code]) codeIndexMapCorrect[code] = 0;
+
+        if (item.no_quote) {
+          codeIndexMapCorrect[code]++;
+          continue;
+        }
+
+        const formIndex = codeIndexMapCorrect[code];
+        const itemMismatches = currentMismatches.filter((m) => m.item_index === i);
+        if (itemMismatches.length > 0) {
+          await correctMismatchedFields(page, item, formIndex, itemMismatches, requestId);
+        }
+
         codeIndexMapCorrect[code]++;
-        continue;
       }
-
-      const formIndex = codeIndexMapCorrect[code];
-      const itemMismatches = currentMismatches.filter((m) => m.item_index === i);
-      if (itemMismatches.length > 0) {
-        await correctMismatchedFields(page, item, formIndex, itemMismatches, requestId);
-      }
-
-      codeIndexMapCorrect[code]++;
     }
 
     await new Promise((resolve) => setTimeout(resolve, 500));

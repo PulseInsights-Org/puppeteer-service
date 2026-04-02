@@ -124,5 +124,30 @@ describe('Puppeteer Router (src/index.js)', () => {
       expect(router).toBeDefined();
       expect(typeof router).toBe('function');
     });
+
+    it('should call setShuttingDown and closeAllBrowsers on SIGTERM', async () => {
+      mockGetShuttingDown.mockReturnValue(false);
+
+      // Emit SIGTERM to trigger gracefulShutdown
+      process.emit('SIGTERM');
+
+      // Allow async operations to complete
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(mockSetShuttingDown).toHaveBeenCalledWith(true);
+      expect(mockCloseAllBrowsers).toHaveBeenCalled();
+    });
+
+    it('should skip shutdown if already shutting down', async () => {
+      mockGetShuttingDown.mockReturnValue(true);
+
+      process.emit('SIGINT');
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // setShuttingDown should NOT be called because we're already shutting down
+      expect(mockSetShuttingDown).not.toHaveBeenCalled();
+      expect(mockCloseAllBrowsers).not.toHaveBeenCalled();
+    });
   });
 });
